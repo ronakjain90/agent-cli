@@ -5,6 +5,7 @@ require "lipgloss"
 
 require_relative "model"
 require_relative "preferences"
+require_relative "settings"
 require_relative "commands"
 
 class Poll < Bubbletea::Message; end
@@ -49,9 +50,13 @@ class AgentApp
     @opencode_loading = false
     @manual_input = ""
     @manual_error = nil
+    @api_key_input = ""
+    @api_key_error = nil
     @picker_from_chat = false
     @pending_model_id = nil
     @suggest_cursor = 0
+
+    @cursor_pos = 0
 
     @you    = Lipgloss::Style.new.bold(true).foreground("#7D56F4")
     @bot    = Lipgloss::Style.new.foreground("#DFDBDD")
@@ -113,6 +118,7 @@ class AgentApp
       case @mode
       when :pick_provider, :pick_model then update_picker(message)
       when :manual_model then update_manual_entry(message)
+      when :enter_api_key then update_api_key_entry(message)
       else update_chat(message)
       end
     else
@@ -124,6 +130,7 @@ class AgentApp
     case @mode
     when :pick_provider, :pick_model then view_picker
     when :manual_model then view_manual_entry
+    when :enter_api_key then view_api_key_entry
     else view_chat
     end
   end
@@ -131,6 +138,7 @@ class AgentApp
   def open_providers_picker
     @picker_from_chat = true
     @input = ""
+    @cursor_pos = 0
     @suggest_cursor = 0
     prefs = Preferences.load
     if prefs && Provider.find(prefs[:provider])
@@ -161,7 +169,7 @@ class AgentApp
   def update_chat(message)
     return [self, nil] if @thinking
 
-    if @diffs.any?
+    if @diffs.any? && @input.empty?
       if message.to_s == "["
         @diff_cursor = (@diff_cursor - 1) % @diffs.length
         return [self, nil]
@@ -187,22 +195,36 @@ class AgentApp
 
       if message.tab? || message.right?
         @input = suggestions[@suggest_cursor][:name]
+        @cursor_pos = @input.length
         return [self, nil]
       end
     end
 
     if message.enter?
       submit
+    elsif message.left?
+      @cursor_pos = [@cursor_pos - 1, 0].max
+      @suggest_cursor = 0
+      [self, nil]
+    elsif message.right?
+      @cursor_pos = [@cursor_pos + 1, @input.length].min
+      @suggest_cursor = 0
+      [self, nil]
     elsif message.backspace?
-      @input = @input[0...-1] || ""
+      if @cursor_pos > 0
+        @input = @input[0...@cursor_pos - 1] + (@input[@cursor_pos..] || "")
+        @cursor_pos -= 1
+      end
       @suggest_cursor = 0
       [self, nil]
     elsif message.space?
-      @input += " "
+      @input = @input[0...@cursor_pos] + " " + (@input[@cursor_pos..] || "")
+      @cursor_pos += 1
       @suggest_cursor = 0
       [self, nil]
-    elsif message.to_s.length == 1
-      @input += message.to_s
+    elsif (text = typed_text(message))
+      @input = @input[0...@cursor_pos] + text + (@input[@cursor_pos..] || "")
+      @cursor_pos += text.length
       @suggest_cursor = 0
       [self, nil]
     else
@@ -274,8 +296,8 @@ class AgentApp
       return [self, nil]
     end
 
-    if message.to_s.length == 1
-      @manual_input += message.to_s
+    if (text = typed_text(message))
+      @manual_input += text
       @manual_error = nil
       return [self, nil]
     end
@@ -349,12 +371,21 @@ class AgentApp
     @mode = :chat
     @picker_from_chat = false
     @pending_model_id = nil
+    @api_key_input = ""
+    @api_key_error = nil
     @messages = []
     @picker_error = nil
     @log << ready_message
     unless was_chat
       @log << { kind: :assistant, text: "Ask me to read, write, or run something. Type /providers to switch." }
     end
+    [self, nil]
+  rescue Settings::MissingApiKeyError => e
+    @pending_model_id = model_id
+    @mode = :enter_api_key
+    @api_key_input = ""
+    @api_key_error = nil
+    @picker_error = nil
     [self, nil]
   rescue => e
     @picker_error = e.message
@@ -363,6 +394,118 @@ class AgentApp
       [self, nil]
     else
       reset_to_provider_picker
+    end
+  end
+
+  def update_api_key_entry(message)
+    if message.esc?
+      @mode = :pick_model
+      @api_key_input = ""
+      @api_key_error = nil
+      return [self, nil]
+    end
+
+    return confirm_api_key if message.enter?
+
+    if message.backspace?
+      @api_key_input = @api_key_input[0...-1] || ""
+      @api_key_error = nil
+      return [self, nil]
+    end
+
+    # Ctrl+V / Cmd often arrives as ctrl+v — pull from system clipboard.
+    if message.to_s == "ctrl+v"
+      pasted = AgentCli::InputDrain.clipboard_text
+      if pasted && !pasted.empty?
+        @api_key_input += pasted.gsub(/[\r\n\t]+/, "").strip
+        @api_key_error = nil
+      else
+        @api_key_error = "clipboard empty (try paste, or ctrl+v)"
+      end
+      return [self, nil]
+    end
+
+    if message.space?
+      @api_key_input += " "
+      @api_key_error = nil
+      return [self, nil]
+    end
+
+    if (text = typed_text(message))
+      @api_key_input += text.gsub(/[\r\n\t]+/, "")
+      @api_key_error = nil
+      return [self, nil]
+    end
+
+    [self, nil]
+  end
+
+  # Insertable characters from a key event, including multi-rune clipboard pastes.
+  def typed_text(message)
+    return nil unless message.is_a?(Bubbletea::KeyMessage)
+    return nil if message.ctrl? || message.enter? || message.backspace? || message.esc?
+    return nil if message.up? || message.down? || message.left? || message.right?
+    return nil if message.tab?
+
+    if message.runes?
+      text = message.char.to_s
+      return text unless text.empty?
+    end
+
+    s = message.to_s
+    return s if s.length == 1 && s.match?(/\A[[:print:]]\z/)
+
+    nil
+  end
+
+  def confirm_api_key
+    key = @api_key_input.strip
+    if key.empty?
+      @api_key_error = "paste or type your API key"
+      return [self, nil]
+    end
+
+    env_name = @selected_provider&.api_key_env
+    unless env_name
+      @api_key_error = "this provider does not need an API key"
+      return [self, nil]
+    end
+
+    Settings.save_api_key(env_name, key)
+    @api_key_input = ""
+    activate_provider(@pending_model_id)
+  rescue => e
+    @api_key_error = e.message
+    [self, nil]
+  end
+
+  def view_api_key_entry
+    env_name = @selected_provider&.api_key_env || "API_KEY"
+    masked =
+      if @api_key_input.empty?
+        @hint.render(" paste key")
+      else
+        "•" * [@api_key_input.length, 64].min
+      end
+
+    lines = [
+      @bot.render("Enter #{env_name}:"),
+      @hint.render(api_key_help_url(env_name)),
+      ""
+    ]
+    lines << @err.render("! #{@api_key_error}") if @api_key_error
+    lines << "#{@prompt.render("key")} #{masked}"
+    lines << ""
+    lines << @hint.render("paste or ctrl+v · enter save · esc back · ctrl+c quit")
+    lines.join("\n")
+  end
+
+  def api_key_help_url(env_name)
+    case env_name
+    when "OPENROUTER_API_KEY" then "https://openrouter.ai/keys  ·  saved to ~/.agent-cli/settings.json"
+    when "ANTHROPIC_API_KEY"  then "https://console.anthropic.com/  ·  saved to ~/.agent-cli/settings.json"
+    when "OPENAI_API_KEY"     then "https://platform.openai.com/api-keys  ·  saved to ~/.agent-cli/settings.json"
+    else "saved to ~/.agent-cli/settings.json"
     end
   end
 
@@ -396,6 +539,8 @@ class AgentApp
     @opencode_loading = false
     @manual_input = ""
     @manual_error = nil
+    @api_key_input = ""
+    @api_key_error = nil
     @pending_model_id = nil
     [self, nil]
   end
@@ -411,6 +556,8 @@ class AgentApp
     @opencode_loading = false
     @manual_input = ""
     @manual_error = nil
+    @api_key_input = ""
+    @api_key_error = nil
     @picker_error = nil
     @pending_model_id = nil
     [self, nil]
@@ -542,7 +689,8 @@ class AgentApp
       else
         ghost = input_ghost_suffix
         placeholder = @input.empty? && suggestions.empty? ? @hint.render("type a request") : ""
-        "#{@prompt.render("you")} #{@input}#{ghost}#{placeholder}"
+        rendered_input = @input[0...@cursor_pos] + @cur.render(@input[@cursor_pos] || "|") + (@input[@cursor_pos + 1..] || "")
+        "#{@prompt.render("you")} #{rendered_input}#{ghost}#{placeholder}"
       end
 
     footer_hint =
@@ -561,62 +709,94 @@ class AgentApp
     end
     content += ["", status, footer]
 
-    if @diffs.any? && @width >= 100
-      layout_side_by_side(content)
+    if @diffs.any? && @width >= 80
+      layout_with_diff_panel(content)
     else
       padding = [@height - content.length, 0].max
       ([""] * padding + content).join("\n")
     end
   end
 
-  def layout_side_by_side(content)
-    diff_view = render_diff_panel
-    diff_lines = diff_view.split("\n")
-    diff_width = [60, (@width * 0.38).to_i].min
-    chat_width = @width - diff_width - 3
-    max_lines = [content.length, diff_lines.length].max
-    padded_chat = content + [""] * [max_lines - content.length, 0].max
-    padded_diff = diff_lines + [""] * [max_lines - diff_lines.length, 0].max
-    sep = @toolok.render(" #{""} ")
+  # Chat fills the screen; diff panel overlays the top-right corner.
+  def layout_with_diff_panel(content)
+    panel_w = [[(@width * 0.42).to_i, 48].max, @width - 24].min
+    panel_h = [[(@height * 0.55).to_i, 12].max, @height - 6].min
+    chat_w = @width - panel_w - 1
 
-    combined = padded_chat.each_with_index.map do |chat_line, i|
-      chat_trimmed = chat_line.to_s[0, chat_width].ljust(chat_width)
-      diff_trimmed = padded_diff[i].to_s[0, diff_width].ljust(diff_width)
-      "#{chat_trimmed}#{sep}#{diff_trimmed}"
+    panel_lines = render_diff_panel(panel_w, panel_h)
+    chat_lines = content.map { |line| truncate_display(line.to_s, chat_w) }
+
+    # Pin chat to the bottom of the left column (same as before).
+    left_budget = @height
+    left = ([""] * [left_budget - chat_lines.length, 0].max) + chat_lines.last(left_budget)
+
+    rows = left.each_with_index.map do |chat_line, i|
+      if i < panel_lines.length
+        left_pad = truncate_display(chat_line, chat_w).ljust(chat_w)
+        "#{left_pad} #{panel_lines[i]}"
+      else
+        truncate_display(chat_line, @width)
+      end
     end
 
-    visible = combined.last(@height)
-    ([""] * [@height - visible.length, 0].max + visible).join("\n")
+    rows.join("\n")
   end
 
-  def render_diff_panel
-    return "" if @diffs.empty?
+  def render_diff_panel(width, height)
+    return [] if @diffs.empty?
 
     diff = @diffs[@diff_cursor] || @diffs.last
     header_style = Lipgloss::Style.new.foreground("#7D56F4").bold(true)
     add_style    = Lipgloss::Style.new.foreground("#5AF78E")
     del_style    = Lipgloss::Style.new.foreground("#FF6B6B")
     hunk_style   = Lipgloss::Style.new.foreground("#66D9EF")
-    dim_style    = Lipgloss::Style.new.foreground("#666666")
+    dim_style    = Lipgloss::Style.new.foreground("#555555")
+    border_style = Lipgloss::Style.new.foreground("#444444")
 
-    title = @diffs.length > 1 ? "diff #{@diff_cursor + 1}/#{@diffs.length}" : "diff"
-    lines = [header_style.render(title)]
-
-    diff.split("\n").each do |line|
-      if line.start_with?("@@")
-        lines << hunk_style.render(line)
-      elsif line.start_with?("+")
-        lines << add_style.render(line)
-      elsif line.start_with?("-")
-        lines << del_style.render(line)
-      elsif line.start_with?("---") || line.start_with?("+++")
-        lines << header_style.render(line)
+    title =
+      if @diffs.length > 1
+        "diff #{@diff_cursor + 1}/#{@diffs.length}  [ / ]"
       else
-        lines << dim_style.render(line)
+        "diff  [ / ]"
       end
+
+    raw = diff.split("\n")
+    body = raw.first([height - 2, 1].max).map do |line|
+      clipped = line.byteslice(0, width - 2).to_s
+      styled =
+        if line.start_with?("@@")
+          hunk_style.render(clipped)
+        elsif line.start_with?("+") && !line.start_with?("+++")
+          add_style.render(clipped)
+        elsif line.start_with?("-") && !line.start_with?("---")
+          del_style.render(clipped)
+        elsif line.start_with?("---") || line.start_with?("+++")
+          header_style.render(clipped)
+        else
+          dim_style.render(clipped)
+        end
+      "#{border_style.render("│")}#{styled}"
     end
 
-    lines.join("\n")
+    top = "#{border_style.render("┌")}#{header_style.render(" #{title} ".ljust([width - 1, 0].max))}"
+    [top] + body
+  end
+
+  # Strip ANSI for length checks, keep rendered string otherwise.
+  def truncate_display(str, width)
+    return "" if width <= 0
+    return str if strip_ansi(str).length <= width
+
+    # Prefer cutting the raw string when no ANSI; otherwise leave as-is.
+    if str == strip_ansi(str)
+      str[0, width]
+    else
+      str
+    end
+  end
+
+  def strip_ansi(str)
+    str.gsub(/\e\[[0-9;]*m/, "")
   end
 
   def picker_title
@@ -683,6 +863,7 @@ class AgentApp
 
       chosen = matches.find { |cmd| cmd[:name] == text } || matches[@suggest_cursor] || matches.first
       @input = ""
+      @cursor_pos = 0
       @suggest_cursor = 0
       return Commands.run(chosen[:name], self)
     end
@@ -696,7 +877,10 @@ class AgentApp
     @log << { kind: :user, text: text }
     @messages << { "role" => "user", "content" => text }
     @input = ""
+    @cursor_pos = 0
     @thinking = true
+    @diffs = []
+    @diff_cursor = -1
 
     @worker = Thread.new(@messages, @events) do |msgs, events|
       @provider.run_turn(msgs, events)

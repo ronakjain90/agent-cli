@@ -1,19 +1,33 @@
-module Diff
-  def self.unified(old_path, old_text, new_text, context: 3)
-    old_lines = old_text.lines.map(&:chomp)
-    new_lines = new_text.lines.map(&:chomp)
+# frozen_string_literal: true
 
+# Minimal unified-diff generator for write_file changes.
+# test diff
+module Diff
+  module_function
+
+  def unified(path, old_text, new_text, context: 3)
+    old_lines = old_text.to_s.lines.map(&:chomp)
+    new_lines = new_text.to_s.lines.map(&:chomp)
     return "" if old_lines == new_lines
 
     ses = compute_ses(old_lines, new_lines)
-    format_unified(old_path, old_lines, new_lines, ses, context)
+    format_unified(path, old_lines, new_lines, ses, context)
   end
 
-  def self.compute_ses(a, b)
+  def compute_ses(a, b)
     m = a.length
     n = b.length
+    # Cap to keep memory reasonable for huge files.
+    if m > 5_000 || n > 5_000
+      return coarse_ses(a, b)
+    end
+
     dp = Array.new(m + 1) { Array.new(n + 1, 0) }
-    (1..m).each { |i| (1..n).each { |j| dp[i][j] = a[i - 1] == b[j - 1] ? dp[i - 1][j - 1] + 1 : [dp[i - 1][j], dp[i][j - 1]].max } }
+    (1..m).each do |i|
+      (1..n).each do |j|
+        dp[i][j] = a[i - 1] == b[j - 1] ? dp[i - 1][j - 1] + 1 : [dp[i - 1][j], dp[i][j - 1]].max
+      end
+    end
 
     ses = []
     i = m
@@ -34,27 +48,31 @@ module Diff
     ses
   end
 
-  def self.format_unified(old_path, old_lines, new_lines, ses, context)
+  def coarse_ses(a, b)
+    ses = []
+    a.each_index { |i| ses << [:del, i, nil] }
+    b.each_index { |j| ses << [:ins, nil, j] }
+    ses
+  end
+
+  def format_unified(path, old_lines, new_lines, ses, context)
     return "" if ses.all? { |op, _, _| op == :eq }
 
-    result = ["--- a/#{old_path}", "+++ b/#{old_path}"]
-
+    result = ["--- a/#{path}", "+++ b/#{path}"]
     changed_indices = ses.each_index.select { |i| ses[i][0] != :eq }
     return "" if changed_indices.empty?
 
     hunks = []
     i = 0
     while i < changed_indices.length
-      hunk_start_cs = changed_indices[i]
+      hunk_start = changed_indices[i]
       j = i
       while j + 1 < changed_indices.length && changed_indices[j + 1] - changed_indices[j] <= context * 2 + 1
         j += 1
       end
-      hunk_end_ce = changed_indices[j]
-
-      lo = [hunk_start_cs - context, 0].max
-      hi = [hunk_end_ce + context, ses.length - 1].min
-
+      hunk_end = changed_indices[j]
+      lo = [hunk_start - context, 0].max
+      hi = [hunk_end + context, ses.length - 1].min
       hunks << [lo, hi]
       i = j + 1
     end
@@ -82,12 +100,14 @@ module Diff
         end
       end
 
+      old_start ||= 0
+      new_start ||= 0
       result << "@@ -#{old_start},#{old_count} +#{new_start},#{new_count} @@"
 
       (lo..hi).each do |idx|
         op = ses[idx]
         case op[0]
-        when :eq then result << " #{old_lines[op[1]]}"
+        when :eq  then result << " #{old_lines[op[1]]}"
         when :del then result << "-#{old_lines[op[1]]}"
         when :ins then result << "+#{new_lines[op[2]]}"
         end

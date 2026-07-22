@@ -191,8 +191,22 @@ class OpencodeProvider
         name   = part["tool"] || part.dig("state", "title") || "tool"
         status = part.dig("state", "status")
         events << { kind: :tool, text: [name, status].compact.join(" · ") }
+      when "patch"
+        files = Array(part["files"])
+        events << { kind: :tool_result, text: "patched #{files.join(", ")}" } if files.any?
       end
     end
+
+    # OpenCode owns its own write/edit tools — pull the session diff for the panel.
+    # /session/:id/diff wants the *user* message id; assistant responses expose it as parentID.
+    info = resp["info"] || {}
+    user_message_id =
+      if info["role"] == "assistant"
+        info["parentID"]
+      else
+        info["id"]
+      end
+    emit_session_diffs(events, user_message_id)
   rescue => e
     events << { kind: :error, text: "opencode: #{e.class}: #{e.message}" }
   ensure
@@ -201,6 +215,33 @@ class OpencodeProvider
 
   private
 
+  def emit_session_diffs(events, message_id = nil)
+    query = {}
+    query[:messageID] = message_id if message_id && !message_id.to_s.empty?
+
+    diffs = http(:get, "/session/#{@session_id}/diff", nil, query)
+    Array(diffs).each do |item|
+      next unless item.is_a?(Hash)
+
+      patch = item["patch"].to_s
+      next if patch.empty?
+
+      path = item["file"] || item["path"] || "file"
+      # Ensure headers so the panel can style --- / +++ lines.
+      unless patch.start_with?("---") || patch.include?("\n--- ")
+        patch = "--- a/#{path}\n+++ b/#{path}\n#{patch}"
+      end
+
+      events << {
+        kind: :tool_result,
+        text: "diff #{path} (+#{item["additions"] || 0}/-#{item["deletions"] || 0})",
+        diff: patch
+      }
+    end
+  rescue => e
+    events << { kind: :tool_result, text: "diff unavailable: #{e.message}" }
+  end
+
   def ensure_session
     return if @session_id
 
@@ -208,9 +249,12 @@ class OpencodeProvider
     @session_id = resp["id"] or raise "session create returned no id: #{resp.inspect}"
   end
 
-  def http(method, path, body = nil)
+  def http(method, path, body = nil, query = nil)
     uri = @base.dup
     uri.path = path
+    if query && !query.empty?
+      uri.query = URI.encode_www_form(query)
+    end
 
     req =
       case method
@@ -229,6 +273,12 @@ class OpencodeProvider
 
     raise "HTTP #{res.code}: #{res.body}" unless res.is_a?(Net::HTTPSuccess)
 
-    res.body.to_s.empty? ? {} : JSON.parse(res.body)
+    # Raw text responses (e.g. some diff endpoints) — return as-is string wrapped.
+    content_type = res["content-type"].to_s
+    if content_type.include?("json") || res.body.to_s.strip.start_with?("{", "[")
+      res.body.to_s.empty? ? {} : JSON.parse(res.body)
+    else
+      res.body.to_s
+    end
   end
 end

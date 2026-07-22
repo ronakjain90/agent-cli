@@ -23,11 +23,12 @@ class Provider
     def self.description = "GPT / o-series via OpenAI API (needs OPENAI_API_KEY)"
     def self.model_picker_title = "Select OpenAI model:"
 
-    def build(model_id)
-      key = ENV["OPENAI_API_KEY"]
-      raise "Set OPENAI_API_KEY for the openai provider. Export it and try again." if key.nil? || key.empty?
+    def api_key_env
+      "OPENAI_API_KEY"
+    end
 
-      OpenaiProvider.new(api_key: key, model: model_id)
+    def build(model_id)
+      OpenaiProvider.new(api_key: Settings.require_api_key(api_key_env), model: model_id)
     end
   end
 end

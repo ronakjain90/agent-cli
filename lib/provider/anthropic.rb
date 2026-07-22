@@ -24,11 +24,12 @@ class Provider
     def self.description = "Claude via Anthropic API (needs ANTHROPIC_API_KEY)"
     def self.model_picker_title = "Select Claude model:"
 
-    def build(model_id)
-      key = ENV["ANTHROPIC_API_KEY"]
-      raise "Set ANTHROPIC_API_KEY for the anthropic provider. Export it and try again." if key.nil? || key.empty?
+    def api_key_env
+      "ANTHROPIC_API_KEY"
+    end
 
-      AnthropicProvider.new(api_key: key, model: model_id)
+    def build(model_id)
+      AnthropicProvider.new(api_key: Settings.require_api_key(api_key_env), model: model_id)
     end
   end
 end

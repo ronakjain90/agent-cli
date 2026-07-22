@@ -2,12 +2,13 @@
 
 require_relative "../agent_cli/model"
 require_relative "../agent_cli/preferences"
+require_relative "../agent_cli/settings"
 
 # Metadata + factory for each provider kind.
 class Provider
   class << self
     def all
-      @all ||= [Anthropic.new, Openai.new, Opencode.new]
+      @all ||= [Anthropic.new, Openai.new, Openrouter.new, Opencode.new]
     end
 
     def find(id)
@@ -23,7 +24,7 @@ class Provider
     def from_env
       kind = env_or("AGENT_PROVIDER", "anthropic")
       provider = find(kind.to_sym)
-      abort "Unknown AGENT_PROVIDER #{ENV["AGENT_PROVIDER"].inspect} (expected 'anthropic', 'openai', or 'opencode')." unless provider
+      abort "Unknown AGENT_PROVIDER #{ENV["AGENT_PROVIDER"].inspect} (expected 'anthropic', 'openai', 'openrouter', or 'opencode')." unless provider
 
       provider.build_from_env
     rescue => e
@@ -98,6 +99,11 @@ class Provider
 
   def show_model_id_in_picker?
     false
+  end
+
+  # Env var name for this provider's API key, or nil if none needed.
+  def api_key_env
+    nil
   end
 
   def env_or(name, default)

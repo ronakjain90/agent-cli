@@ -2,7 +2,7 @@
 
 require_relative "diff"
 
-# Capabilities exposed to the model (anthropic / openai providers).
+# Capabilities exposed to the model (anthropic / openai / openrouter providers).
 module Tools
   DEFINITIONS = [
     {
@@ -54,14 +54,14 @@ module Tools
       ["read #{path}", body]
     when "write_file"
       path = input["path"]
-      old_content = File.read(path) rescue nil
-      File.write(path, input["content"].to_s)
-      diff_info = nil
-      if old_content
-        d = Diff.unified(path, old_content, input["content"].to_s)
-        diff_info = d unless d.empty?
-      end
-      ["wrote #{path} (#{input["content"].to_s.bytesize} bytes)", "ok", diff_info]
+      new_content = input["content"].to_s
+      existed = File.exist?(path)
+      old_content = existed ? File.read(path) : ""
+      File.write(path, new_content)
+      d = Diff.unified(path, old_content, new_content)
+      diff_info = d.empty? ? nil : d
+      label = existed ? "wrote #{path} (#{new_content.bytesize} bytes)" : "created #{path} (#{new_content.bytesize} bytes)"
+      [label, "ok", diff_info]
     when "list_files"
       path = input["path"] || "."
       entries = Dir.children(path).sort.map do |e|
