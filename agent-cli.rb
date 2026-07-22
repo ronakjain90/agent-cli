@@ -11,6 +11,7 @@
 #     * openrouter — OpenRouter gateway (free + paid models, OpenAI-compatible)
 #     * google     — Google Gemini via AI Studio (OpenAI-compatible)
 #     * groq       — Groq LPU inference (OpenAI-compatible)
+#     * ollama     — local Ollama server (`ollama serve`)
 #     * opencode   — local OpenCode server (`opencode serve`)
 #
 # Setup:
@@ -33,14 +34,20 @@
 #   export GROQ_API_KEY=...
 #   AGENT_PROVIDER=groq AGENT_MODEL=llama-3.3-70b-versatile ruby agent-cli.rb
 #
+#   ollama serve
+#   ollama pull llama3.1
+#   AGENT_PROVIDER=ollama AGENT_MODEL=llama3.1 ruby agent-cli.rb
+#
 #   opencode serve --port 4096
 #   AGENT_PROVIDER=opencode AGENT_MODEL=anthropic/claude-opus-4-8 ruby agent-cli.rb
 #
-# Shell execution (anthropic / openai / openrouter / google / groq) is OFF by default:
+# Shell execution (anthropic / openai / openrouter / google / groq / ollama) asks for permission
+# by default (y once · a session · n deny). Skip prompts with:
 #   AGENT_ALLOW_SHELL=1 ruby agent-cli.rb
 #
 # Keys (chat):  type a request, Enter to send · /providers to switch · ctrl+c quit
 # Keys (picker): ↑/↓ move · enter select · esc back · ctrl+c quit
+# Keys (permission): y/enter allow once · a allow session · n/esc deny · ctrl+c quit
 
 $LOAD_PATH.unshift File.expand_path("lib", __dir__)
 require "agent_cli"

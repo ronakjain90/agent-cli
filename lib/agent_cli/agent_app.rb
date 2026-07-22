@@ -48,8 +48,8 @@ class AgentApp
     @menu_cursor = 0
     @menu_scroll = 0
     @picker_error = nil
-    @opencode_error = nil
-    @opencode_loading = false
+    @models_error = nil
+    @models_loading = false
     @manual_input = ""
     @manual_error = nil
     @api_key_input = ""
@@ -63,15 +63,20 @@ class AgentApp
 
     @cursor_pos = 0
     @usage = Usage.blank
+    @pending_permission = nil
 
     @you    = Lipgloss::Style.new.bold(true).foreground("#7D56F4")
     @bot    = Lipgloss::Style.new
     @tool   = Lipgloss::Style.new.foreground("#2DA44E")
     @toolok = Lipgloss::Style.new.foreground("#656D76")
     @err    = Lipgloss::Style.new.foreground("#CF222E").bold(true)
+    @warn   = Lipgloss::Style.new.foreground("#9A6700").bold(true)
     @prompt = Lipgloss::Style.new.foreground("#FAFAFA").background("#7D56F4").padding(0, 1)
     @hint   = Lipgloss::Style.new.foreground("#656D76")
     @cur    = Lipgloss::Style.new.reverse(true)
+
+    # Worker thread blocks here until the TUI answers a permission prompt.
+    Tools.approver = method(:ask_tool_permission)
   end
 
   def init
@@ -96,12 +101,12 @@ class AgentApp
       [self, nil]
 
     when FetchDone
-      @opencode_loading = false
+      @models_loading = false
       if message.error
-        @opencode_error = message.error
+        @models_error = message.error
         @model_items = [Model.other]
       else
-        @opencode_error = nil
+        @models_error = nil
         @model_items = message.items + [Model.other]
       end
       @menu_cursor = 0
@@ -112,7 +117,7 @@ class AgentApp
 
     when Poll
       drain_events
-      if @thinking || @opencode_loading
+      if @thinking || @models_loading || @mode == :permission
         @frame = (@frame + 1) % SPINNER.length
         [self, tick]
       else
@@ -126,6 +131,7 @@ class AgentApp
       when :pick_provider, :pick_model then update_picker(message)
       when :manual_model then update_manual_entry(message)
       when :enter_api_key then update_api_key_entry(message)
+      when :permission then update_permission(message)
       else update_chat(message)
       end
     else
@@ -138,8 +144,16 @@ class AgentApp
     when :pick_provider, :pick_model then view_picker
     when :manual_model then view_manual_entry
     when :enter_api_key then view_api_key_entry
+    when :permission then view_permission
     else view_chat
     end
+  end
+
+  # Called from the worker thread via Tools.approver.
+  def ask_tool_permission(tool, detail)
+    reply = Queue.new
+    @events << { kind: :permission_request, tool: tool, detail: detail, reply: reply }
+    reply.pop
   end
 
   def open_providers_picker
@@ -171,6 +185,40 @@ class AgentApp
 
   def ready_message
     { kind: :assistant, text: "Coding agent ready — provider: #{@provider.label} · model: #{@provider.model_label}" }
+  end
+
+  def update_permission(message)
+    key = message.to_s
+    decision =
+      if message.enter? || key == "y" || key == "Y"
+        :allow
+      elsif key == "a" || key == "A"
+        :always
+      elsif key == "n" || key == "N" || message.esc?
+        :deny
+      end
+    return [self, nil] unless decision
+
+    reply_permission(decision)
+    [self, tick]
+  end
+
+  def reply_permission(decision)
+    pending = @pending_permission
+    @pending_permission = nil
+    @mode = :chat
+    return unless pending && pending[:reply]
+
+    case decision
+    when :allow
+      @log << { kind: :tool_result, text: "  allowed once" }
+    when :always
+      @log << { kind: :tool_result, text: "  allowed for this session" }
+    when :deny
+      @log << { kind: :tool_result, text: "  denied" }
+    end
+
+    pending[:reply] << decision
   end
 
   def update_chat(message)
@@ -246,7 +294,7 @@ class AgentApp
   end
 
   def update_picker(message)
-    return [self, nil] if @opencode_loading
+    return [self, nil] if @models_loading
 
     if message.esc?
       if @mode == :pick_model
@@ -345,15 +393,15 @@ class AgentApp
     return [self, nil] unless @selected_provider
 
     @picker_error = nil
-    @opencode_error = nil
+    @models_error = nil
     @pending_model_id = model_id
 
-    if @selected_provider.is_a?(Provider::Opencode)
+    if @selected_provider.respond_to?(:fetch_models)
       @mode = :pick_model
       @model_items = []
       @menu_cursor = 0
       @menu_scroll = 0
-      @opencode_loading = true
+      @models_loading = true
       provider = @selected_provider
       [self, Bubbletea.batch(
         tick,
@@ -551,8 +599,8 @@ class AgentApp
     @model_items = []
     @menu_cursor = provider_menu_index(Preferences.load&.dig(:provider))
     @menu_scroll = 0
-    @opencode_error = nil
-    @opencode_loading = false
+    @models_error = nil
+    @models_loading = false
     @manual_input = ""
     @manual_error = nil
     @api_key_input = ""
@@ -568,8 +616,8 @@ class AgentApp
     @model_items = []
     @menu_cursor = 0
     @menu_scroll = 0
-    @opencode_error = nil
-    @opencode_loading = false
+    @models_error = nil
+    @models_loading = false
     @manual_input = ""
     @manual_error = nil
     @api_key_input = ""
@@ -643,12 +691,13 @@ class AgentApp
       lines << ""
     end
 
-    if @mode == :pick_model && @opencode_loading
-      url = @selected_provider&.base_url || "http://127.0.0.1:4096"
+    if @mode == :pick_model && @models_loading
+      url = @selected_provider&.base_url || "http://127.0.0.1:11434"
       lines << @tool.render("#{SPINNER[@frame]} loading models from #{url}…")
-    elsif @mode == :pick_model && @opencode_error
-      lines << @err.render("! #{@opencode_error}")
-      lines << @hint.render("start the server: opencode serve --port 4096")
+    elsif @mode == :pick_model && @models_error
+      lines << @err.render("! #{@models_error}")
+      hint = @selected_provider&.respond_to?(:server_hint) ? @selected_provider.server_hint : "check that the server is running"
+      lines << @hint.render(hint)
       lines << ""
     end
 
@@ -694,6 +743,23 @@ class AgentApp
     lines << ""
     lines << @hint.render("enter confirm · esc back · ctrl+c quit")
     lines.join("\n")
+  end
+
+  def view_permission
+    req = @pending_permission || {}
+    lines = visible_log
+    detail = req[:detail].to_s
+    tool = req[:tool].to_s
+    status = @warn.render("allow #{tool}? #{detail}")
+    footer = @hint.render("y/enter allow once · a allow session · n/esc deny · ctrl+c quit")
+    usage = usage_line
+
+    content = lines + ["", status]
+    content << usage if usage
+    content << footer
+
+    padding = [@height - content.length, 0].max
+    ([""] * padding + content).join("\n")
   end
 
   def view_chat
@@ -849,7 +915,7 @@ class AgentApp
   def menu_visible_budget
     overhead = 4
     overhead += 2 if @picker_error
-    overhead += 3 if @mode == :pick_model && (@opencode_loading || @opencode_error)
+    overhead += 3 if @mode == :pick_model && (@models_loading || @models_error)
     [@height - overhead, 3].max
   end
 
@@ -965,9 +1031,17 @@ class AgentApp
     until @events.empty?
       ev = @events.pop(true) rescue break
       case ev[:kind]
-      when :done then @thinking = false
+      when :done
+        if @pending_permission
+          reply_permission(:deny)
+        end
+        @thinking = false
       when :usage
         Usage.add!(@usage, ev[:usage])
+      when :permission_request
+        @pending_permission = ev
+        @mode = :permission
+        @log << { kind: :tool_result, text: "  needs permission: #{ev[:detail]}" }
       else
         @log << ev
         if ev[:diff]

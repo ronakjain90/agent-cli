@@ -71,6 +71,10 @@ class Provider
       env_or("OPENCODE_URL", "http://127.0.0.1:4096")
     end
 
+    def server_hint
+      "start the server: opencode serve --port 4096"
+    end
+
     def parse_model_spec(spec)
       provider_id, model_id = spec.split("/", 2)
       if model_id.nil? || model_id.empty?

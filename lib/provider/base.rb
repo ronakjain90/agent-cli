@@ -8,7 +8,7 @@ require_relative "../agent_cli/settings"
 class Provider
   class << self
     def all
-      @all ||= [Anthropic.new, Openai.new, Openrouter.new, Google.new, Groq.new, Opencode.new]
+      @all ||= [Anthropic.new, Openai.new, Openrouter.new, Google.new, Groq.new, Ollama.new, Opencode.new]
     end
 
     def find(id)
@@ -25,7 +25,7 @@ class Provider
     def from_env
       kind = env_or("AGENT_PROVIDER", "anthropic")
       provider = find(kind.to_sym)
-      abort "Unknown AGENT_PROVIDER #{ENV["AGENT_PROVIDER"].inspect} (expected 'anthropic', 'openai', 'openrouter', 'google', 'groq', or 'opencode')." unless provider
+      abort "Unknown AGENT_PROVIDER #{ENV["AGENT_PROVIDER"].inspect} (expected 'anthropic', 'openai', 'openrouter', 'google', 'groq', 'ollama', or 'opencode')." unless provider
 
       provider.build_from_env
     rescue => e
