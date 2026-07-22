@@ -5,6 +5,7 @@ require "net/http"
 require "uri"
 
 require_relative "../agent_cli/model"
+require_relative "../agent_cli/usage"
 require_relative "base"
 
 class Provider
@@ -181,6 +182,10 @@ class OpencodeProvider
       model: { providerID: @provider_id, modelID: @model_id },
       parts: [{ type: "text", text: text }]
     })
+
+    if (usage = Usage.from_opencode(resp))
+      events << { kind: :usage, usage: usage }
+    end
 
     Array(resp["parts"]).each do |part|
       case part["type"]

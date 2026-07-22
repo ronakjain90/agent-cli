@@ -6,6 +6,7 @@ require "uri"
 
 require_relative "../agent_cli/constants"
 require_relative "../agent_cli/tools"
+require_relative "../agent_cli/usage"
 require_relative "base"
 
 class Provider
@@ -65,6 +66,10 @@ class AnthropicProvider
       if resp["type"] == "error"
         events << { kind: :error, text: resp.dig("error", "message") || resp.inspect }
         return
+      end
+
+      if (usage = Usage.from_anthropic(resp["usage"]))
+        events << { kind: :usage, usage: usage }
       end
 
       tool_uses = []

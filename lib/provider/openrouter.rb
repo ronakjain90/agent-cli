@@ -16,6 +16,7 @@ class Provider
     MODELS = [
       { id: "openrouter/auto",                        label: "Auto                    — OpenRouter picks a model" },
       { id: "openai/gpt-oss-20b:free",                label: "GPT-OSS 20B (free)      — free, tool-calling" },
+      { id: "tencent/hy3:free",                       label: "Hy3 (free)              — free, 295B MoE coding" },
       { id: "google/gemma-4-31b-it:free",              label: "Gemma 4 31B (free)      — free, large context" },
       { id: "cohere/north-mini-code:free",            label: "North Mini Code (free)  — free, coding-focused" },
       { id: "nvidia/nemotron-3-super-120b-a12b:free", label: "Nemotron 3 Super (free) — free, strong general" },

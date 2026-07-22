@@ -6,6 +6,7 @@ require "uri"
 
 require_relative "../agent_cli/constants"
 require_relative "../agent_cli/tools"
+require_relative "../agent_cli/usage"
 require_relative "base"
 
 class Provider
@@ -64,6 +65,10 @@ class OpenaiProvider
       if resp["error"]
         events << { kind: :error, text: resp.dig("error", "message") || resp.inspect }
         return
+      end
+
+      if (usage = Usage.from_openai(resp["usage"]))
+        events << { kind: :usage, usage: usage }
       end
 
       choice = resp.dig("choices", 0)

@@ -6,6 +6,7 @@ require "lipgloss"
 require_relative "model"
 require_relative "preferences"
 require_relative "settings"
+require_relative "usage"
 require_relative "commands"
 
 class Poll < Bubbletea::Message; end
@@ -57,14 +58,16 @@ class AgentApp
     @suggest_cursor = 0
 
     @cursor_pos = 0
+    @usage = Usage.blank
 
     @you    = Lipgloss::Style.new.bold(true).foreground("#7D56F4")
-    @bot    = Lipgloss::Style.new.foreground("#DFDBDD")
-    @tool   = Lipgloss::Style.new.foreground("#5AF78E")
-    @toolok = Lipgloss::Style.new.foreground("#666666")
-    @err    = Lipgloss::Style.new.foreground("#FF6B6B").bold(true)
+    @bot    = Lipgloss::Style.new
+    @tool   = Lipgloss::Style.new.foreground("#2DA44E")
+    @toolok = Lipgloss::Style.new.foreground("#656D76")
+    @err    = Lipgloss::Style.new.foreground("#CF222E").bold(true)
     @prompt = Lipgloss::Style.new.foreground("#FAFAFA").background("#7D56F4").padding(0, 1)
-    @hint   = Lipgloss::Style.new.foreground("#666666")
+    @hint   = Lipgloss::Style.new.foreground("#656D76")
+    @cur    = Lipgloss::Style.new.reverse(true)
   end
 
   def init
@@ -374,6 +377,7 @@ class AgentApp
     @api_key_input = ""
     @api_key_error = nil
     @messages = []
+    @usage = Usage.blank
     @picker_error = nil
     @log << ready_message
     unless was_chat
@@ -702,12 +706,15 @@ class AgentApp
         "enter send · / for commands · ctrl+c quit"
       end
     footer = @hint.render(footer_hint)
+    usage = usage_line
 
     content = lines
     if suggestions.any?
       content += [""] + suggestions
     end
-    content += ["", status, footer]
+    content += ["", status]
+    content << usage if usage
+    content << footer
 
     if @diffs.any? && @width >= 80
       layout_with_diff_panel(content)
@@ -715,6 +722,13 @@ class AgentApp
       padding = [@height - content.length, 0].max
       ([""] * padding + content).join("\n")
     end
+  end
+
+  def usage_line
+    text = Usage.format(@usage)
+    return nil unless text
+
+    @hint.render(text)
   end
 
   # Chat fills the screen; diff panel overlays the top-right corner.
@@ -898,6 +912,8 @@ class AgentApp
       ev = @events.pop(true) rescue break
       case ev[:kind]
       when :done then @thinking = false
+      when :usage
+        Usage.add!(@usage, ev[:usage])
       else
         @log << ev
         if ev[:diff]
@@ -911,6 +927,7 @@ class AgentApp
   def visible_log
     suggestions = slash_suggestions
     extra = suggestions.empty? ? 0 : suggestions.length + 1
+    bottom = Usage.any?(@usage) ? 5 : 4
 
     rendered = @log.map do |e|
       case e[:kind]
@@ -922,7 +939,7 @@ class AgentApp
       end
     end.flat_map { |s| s.to_s.split("\n") }
 
-    budget = [@height - 4 - extra, 5].max
+    budget = [@height - bottom - extra, 5].max
     rendered.last(budget)
   end
 end

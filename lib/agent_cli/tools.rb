@@ -79,6 +79,6 @@ module Tools
       ["unknown tool #{name}", "Error: unknown tool #{name}"]
     end
   rescue => e
-    ["error in #{name}", "Error: #{e.class}: #{e.message}"]
+    ["error in #{name}: #{e.message}", "Error: #{e.class}: #{e.message}"]
   end
 end
