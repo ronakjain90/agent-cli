@@ -5,6 +5,7 @@ require "lipgloss"
 
 require_relative "model"
 require_relative "preferences"
+require_relative "prompt_history"
 require_relative "settings"
 require_relative "usage"
 require_relative "commands"
@@ -56,6 +57,9 @@ class AgentApp
     @picker_from_chat = false
     @pending_model_id = nil
     @suggest_cursor = 0
+    @history = PromptHistory.load
+    @history_index = nil
+    @history_draft = ""
 
     @cursor_pos = 0
     @usage = Usage.blank
@@ -201,6 +205,12 @@ class AgentApp
         @cursor_pos = @input.length
         return [self, nil]
       end
+    elsif message.up?
+      history_up
+      return [self, nil]
+    elsif message.down?
+      history_down
+      return [self, nil]
     end
 
     if message.enter?
@@ -509,6 +519,8 @@ class AgentApp
     when "OPENROUTER_API_KEY" then "https://openrouter.ai/keys  ·  saved to ~/.agent-cli/settings.json"
     when "ANTHROPIC_API_KEY"  then "https://console.anthropic.com/  ·  saved to ~/.agent-cli/settings.json"
     when "OPENAI_API_KEY"     then "https://platform.openai.com/api-keys  ·  saved to ~/.agent-cli/settings.json"
+    when "GEMINI_API_KEY"     then "https://aistudio.google.com/apikey  ·  saved to ~/.agent-cli/settings.json"
+    when "GROQ_API_KEY"       then "https://console.groq.com/keys  ·  saved to ~/.agent-cli/settings.json"
     else "saved to ~/.agent-cli/settings.json"
     end
   end
@@ -862,15 +874,56 @@ class AgentApp
     @menu_scroll = [[@menu_scroll, 0].max, max_scroll].min
   end
 
+  def history_up
+    return if @history.empty?
+
+    if @history_index.nil?
+      @history_draft = @input
+      @history_index = @history.length - 1
+    elsif @history_index > 0
+      @history_index -= 1
+    else
+      return
+    end
+
+    @input = @history[@history_index]
+    @cursor_pos = @input.length
+    @suggest_cursor = 0
+  end
+
+  def history_down
+    return if @history_index.nil?
+
+    if @history_index < @history.length - 1
+      @history_index += 1
+      @input = @history[@history_index]
+    else
+      @history_index = nil
+      @input = @history_draft
+    end
+
+    @cursor_pos = @input.length
+    @suggest_cursor = 0
+  end
+
+  def remember_prompt(text)
+    @history = PromptHistory.append(@history, text)
+    @history_index = nil
+    @history_draft = ""
+  end
+
   def submit
     text = @input.strip
     return [self, nil] if text.empty?
+
+    remember_prompt(text)
 
     if text.start_with?("/") && !text.include?(" ")
       matches = Commands.matching(text)
       if matches.empty?
         @log << { kind: :error, text: "unknown command #{text.inspect} — type /help" }
         @input = ""
+        @cursor_pos = 0
         @suggest_cursor = 0
         return [self, nil]
       end
@@ -885,6 +938,7 @@ class AgentApp
     unless @provider
       @log << { kind: :error, text: "no provider connected — type /providers" }
       @input = ""
+      @cursor_pos = 0
       return [self, nil]
     end
 

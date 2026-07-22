@@ -108,7 +108,7 @@ class OpenrouterProvider < OpenaiProvider
     res = Net::HTTP.start(@uri.host, @uri.port, use_ssl: true, read_timeout: 120) do |http|
       http.request(req)
     end
-    JSON.parse(res.body)
+    parse_response(res.body)
   rescue => e
     { "error" => { "message" => "#{e.class}: #{e.message}" } }
   end

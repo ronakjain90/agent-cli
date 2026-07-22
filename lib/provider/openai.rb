@@ -58,9 +58,17 @@ class OpenaiProvider
     @model
   end
 
+  # OpenAI chat completions reject huge max_tokens; keep room for tool loops.
+  MAX_OUT_TOKENS = 16_384
+
   def run_turn(messages, events)
     MAX_STEPS.times do
       resp = post(messages)
+
+      unless resp.is_a?(Hash)
+        events << { kind: :error, text: "unexpected response: #{resp.inspect}" }
+        return
+      end
 
       if resp["error"]
         events << { kind: :error, text: resp.dig("error", "message") || resp.inspect }
@@ -125,7 +133,7 @@ class OpenaiProvider
 
     req.body = JSON.generate(
       model: @model,
-      max_tokens: MAX_TOKENS,
+      max_tokens: [MAX_TOKENS, MAX_OUT_TOKENS].min,
       messages: [{ role: "system", content: SYSTEM }] + messages,
       tools: openai_tools,
       tool_choice: "auto"
@@ -134,8 +142,26 @@ class OpenaiProvider
     res = Net::HTTP.start(@uri.host, @uri.port, use_ssl: true, read_timeout: 120) do |http|
       http.request(req)
     end
-    JSON.parse(res.body)
+    parse_response(res.body)
+  rescue => e
+    { "error" => { "message" => "#{e.class}: #{e.message}" } }
+  end
+
+  def parse_response(body)
+    data = JSON.parse(body.to_s)
+    if data.is_a?(String)
+      begin
+        nested = JSON.parse(data)
+        data = nested if nested.is_a?(Hash)
+      rescue JSON::ParserError
+        # keep the original string value
+      end
+    end
+    return data if data.is_a?(Hash)
+
+    { "error" => { "message" => "unexpected response: #{data.inspect}" } }
   rescue => e
     { "error" => { "message" => "#{e.class}: #{e.message}" } }
   end
 end
+

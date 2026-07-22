@@ -3,6 +3,7 @@
 require_relative "agent_cli/constants"
 require_relative "agent_cli/model"
 require_relative "agent_cli/preferences"
+require_relative "agent_cli/prompt_history"
 require_relative "agent_cli/settings"
 require_relative "agent_cli/usage"
 require_relative "agent_cli/commands"

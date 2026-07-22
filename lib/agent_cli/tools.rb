@@ -2,7 +2,7 @@
 
 require_relative "diff"
 
-# Capabilities exposed to the model (anthropic / openai / openrouter providers).
+# Capabilities exposed to the model (anthropic / openai / openrouter / google / groq providers).
 module Tools
   DEFINITIONS = [
     {

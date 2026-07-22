@@ -9,6 +9,8 @@
 #     * anthropic  — Anthropic Messages API tool-use loop
 #     * openai     — OpenAI Chat Completions with function calling
 #     * openrouter — OpenRouter gateway (free + paid models, OpenAI-compatible)
+#     * google     — Google Gemini via AI Studio (OpenAI-compatible)
+#     * groq       — Groq LPU inference (OpenAI-compatible)
 #     * opencode   — local OpenCode server (`opencode serve`)
 #
 # Setup:
@@ -25,10 +27,16 @@
 #   export OPENROUTER_API_KEY=sk-or-...
 #   AGENT_PROVIDER=openrouter AGENT_MODEL=openai/gpt-oss-20b:free ruby agent-cli.rb
 #
+#   export GEMINI_API_KEY=...
+#   AGENT_PROVIDER=google AGENT_MODEL=gemini-3.6-flash ruby agent-cli.rb
+#
+#   export GROQ_API_KEY=...
+#   AGENT_PROVIDER=groq AGENT_MODEL=llama-3.3-70b-versatile ruby agent-cli.rb
+#
 #   opencode serve --port 4096
 #   AGENT_PROVIDER=opencode AGENT_MODEL=anthropic/claude-opus-4-8 ruby agent-cli.rb
 #
-# Shell execution (anthropic / openai / openrouter) is OFF by default:
+# Shell execution (anthropic / openai / openrouter / google / groq) is OFF by default:
 #   AGENT_ALLOW_SHELL=1 ruby agent-cli.rb
 #
 # Keys (chat):  type a request, Enter to send · /providers to switch · ctrl+c quit

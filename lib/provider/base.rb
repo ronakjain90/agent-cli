@@ -8,11 +8,12 @@ require_relative "../agent_cli/settings"
 class Provider
   class << self
     def all
-      @all ||= [Anthropic.new, Openai.new, Openrouter.new, Opencode.new]
+      @all ||= [Anthropic.new, Openai.new, Openrouter.new, Google.new, Groq.new, Opencode.new]
     end
 
     def find(id)
-      all.find { |p| p.id == id }
+      id = :google if id.to_s == "gemini"
+      all.find { |p| p.id == id.to_sym }
     end
 
     def picker_bypassed?
@@ -24,7 +25,7 @@ class Provider
     def from_env
       kind = env_or("AGENT_PROVIDER", "anthropic")
       provider = find(kind.to_sym)
-      abort "Unknown AGENT_PROVIDER #{ENV["AGENT_PROVIDER"].inspect} (expected 'anthropic', 'openai', 'openrouter', or 'opencode')." unless provider
+      abort "Unknown AGENT_PROVIDER #{ENV["AGENT_PROVIDER"].inspect} (expected 'anthropic', 'openai', 'openrouter', 'google', 'groq', or 'opencode')." unless provider
 
       provider.build_from_env
     rescue => e
