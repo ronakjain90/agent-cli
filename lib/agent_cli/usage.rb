@@ -3,6 +3,8 @@
 # Normalize and accumulate provider token-usage hashes for the TUI footer.
 module Usage
   EMPTY = { input: 0, output: 0, cache_read: 0, cache_write: 0 }.freeze
+  # Fallback when the provider doesn't advertise a context window.
+  DEFAULT_CONTEXT_WINDOW = 200_000
 
   module_function
 
@@ -78,6 +80,28 @@ module Usage
     parts << "cache read #{commas(totals[:cache_read])}" if totals[:cache_read].to_i > 0
     parts << "cache write #{commas(totals[:cache_write])}" if totals[:cache_write].to_i > 0
     parts.join(" · ")
+  end
+
+  # OpenCode-style meter: "87.2K (44%)" from current context tokens + window size.
+  def format_context(tokens, window = DEFAULT_CONTEXT_WINDOW)
+    tokens = [tokens.to_i, 0].max
+    window = window.to_i
+    return nil if window <= 0
+
+    pct = window.positive? ? ((tokens.to_f / window) * 100).round : 0
+    pct = 100 if pct > 100
+    "#{compact(tokens)} (#{pct}%)"
+  end
+
+  def compact(n)
+    n = n.to_i
+    if n >= 1_000_000
+      Kernel.format("%.1fM", n / 1_000_000.0).sub(/\.0M\z/, "M")
+    elsif n >= 1000
+      Kernel.format("%.1fK", n / 1000.0).sub(/\.0K\z/, "K")
+    else
+      n.to_s
+    end
   end
 
   def commas(n)

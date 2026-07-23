@@ -63,6 +63,7 @@ class AgentApp
 
     @cursor_pos = 0
     @usage = Usage.blank
+    @context_tokens = 0
     @pending_permission = nil
 
     @you    = Lipgloss::Style.new.bold(true).foreground("#7D56F4")
@@ -74,6 +75,22 @@ class AgentApp
     @prompt = Lipgloss::Style.new.foreground("#FAFAFA").background("#7D56F4").padding(0, 1)
     @hint   = Lipgloss::Style.new.foreground("#656D76")
     @cur    = Lipgloss::Style.new.reverse(true)
+    # OpenCode-style composer
+    @composer_bg     = "#EDEDED"
+    @composer_fg     = Lipgloss::Style.new.foreground("#1F2328")
+    @composer_accent = Lipgloss::Style.new.foreground("#7D56F4")
+    @composer_dim    = Lipgloss::Style.new.foreground("#8B949E")
+    @composer_key    = Lipgloss::Style.new.foreground("#1F2328").bold(true)
+    @composer_box    = Lipgloss::Style.new
+      .background(@composer_bg)
+      .foreground("#1F2328")
+      .padding(0, 1)
+      .border_left(true)
+      .border_top(false)
+      .border_bottom(false)
+      .border_right(false)
+      .border_foreground("#7D56F4")
+      .border_style(Lipgloss::NORMAL_BORDER)
 
     # Worker thread blocks here until the TUI answers a permission prompt.
     Tools.approver = method(:ask_tool_permission)
@@ -436,6 +453,7 @@ class AgentApp
     @api_key_error = nil
     @messages = []
     @usage = Usage.blank
+    @context_tokens = 0
     @picker_error = nil
     @log << ready_message
     unless was_chat
@@ -765,40 +783,106 @@ class AgentApp
   def view_chat
     suggestions = view_suggestions
     lines = visible_log
-    status =
-      if @thinking
-        @tool.render("#{SPINNER[@frame]} thinking…")
-      else
-        ghost = input_ghost_suffix
-        placeholder = @input.empty? && suggestions.empty? ? @hint.render("type a request") : ""
-        rendered_input = @input[0...@cursor_pos] + @cur.render(@input[@cursor_pos] || "|") + (@input[@cursor_pos + 1..] || "")
-        "#{@prompt.render("you")} #{rendered_input}#{ghost}#{placeholder}"
-      end
-
-    footer_hint =
-      if @diffs.any?
-        "enter send · / commands · [ / ] diffs · ctrl+c quit"
-      elsif slash_command_active?
-        "↑/↓ select · tab complete · enter run · ctrl+c quit"
-      else
-        "enter send · / for commands · ctrl+c quit"
-      end
-    footer = @hint.render(footer_hint)
-    usage = usage_line
 
     content = lines
     if suggestions.any?
       content += [""] + suggestions
     end
-    content += ["", status]
-    content << usage if usage
-    content << footer
+    content += [""] + composer_lines + [status_bar_line]
 
     if @diffs.any? && @width >= 80
       layout_with_diff_panel(content)
     else
       padding = [@height - content.length, 0].max
       ([""] * padding + content).join("\n")
+    end
+  end
+
+  # Gray box with purple left edge: input row + Agent · model · provider.
+  def composer_lines
+    width = [@width, 40].max
+    input =
+      if @thinking
+        @composer_dim.render("#{SPINNER[@frame]} thinking…")
+      else
+        ghost = input_ghost_suffix
+        placeholder =
+          if @input.empty? && slash_suggestions.empty?
+            @composer_dim.render("type a request")
+          else
+            ""
+          end
+        cell = @input[@cursor_pos]
+        cursor = @cur.render(cell || " ")
+        after = cell ? (@input[(@cursor_pos + 1)..] || "") : (@input[@cursor_pos..] || "")
+        "#{@input[0...@cursor_pos]}#{cursor}#{after}#{ghost}#{placeholder}"
+      end
+
+    @composer_box.width(width).render("#{input}\n\n#{composer_meta}").split("\n")
+  end
+
+  def composer_meta
+    mode = @composer_accent.render("Agent")
+    sep = @composer_dim.render(" · ")
+    if @provider
+      model = @composer_fg.render(@provider.model_label.to_s)
+      provider = @composer_dim.render(" #{@provider.label}")
+      "#{mode}#{sep}#{model}#{provider}"
+    else
+      "#{mode}#{sep}#{@composer_dim.render("no model — /providers")}"
+    end
+  end
+
+  # Left: activity · Right: context meter + command hint (OpenCode-style footer).
+  def status_bar_line
+    left =
+      if @thinking
+        @composer_dim.render("#{SPINNER[@frame]}······  esc interrupt")
+      else
+        ""
+      end
+
+    usage = Usage.format_context(display_context_tokens, context_window)
+    hint =
+      if @diffs.any?
+        "#{@composer_key.render("[ ]")} #{@composer_dim.render("diffs")}  #{@composer_key.render("/")} #{@composer_dim.render("commands")}"
+      elsif slash_command_active?
+        "#{@composer_key.render("tab")} #{@composer_dim.render("complete")}  #{@composer_key.render("enter")} #{@composer_dim.render("run")}"
+      else
+        "#{@composer_key.render("/")} #{@composer_dim.render("commands")}"
+      end
+
+    right = "#{@composer_dim.render(usage)}  #{hint}"
+    pad = [@width - strip_ansi(left).length - strip_ansi(right).length, 1].max
+    "#{left}#{" " * pad}#{right}"
+  end
+
+  # Prefer last API prompt size; otherwise rough-estimate from the in-flight transcript.
+  def display_context_tokens
+    api = @context_tokens.to_i
+    est = estimate_context_tokens
+    [api, est].max
+  end
+
+  def estimate_context_tokens
+    chars = 0
+    (@messages || []).each do |m|
+      chars += m["content"].to_s.length
+      if (tcs = m["tool_calls"]).is_a?(Array)
+        tcs.each { |tc| chars += tc.to_s.length }
+      end
+    end
+    chars += @input.to_s.length
+    # system prompt + tool schemas travel with every OpenAI-compatible request
+    chars += 1_200 if @provider
+    (chars / 4.0).ceil
+  end
+
+  def context_window
+    if @provider.respond_to?(:context_window) && (w = @provider.context_window).to_i > 0
+      w.to_i
+    else
+      Usage::DEFAULT_CONTEXT_WINDOW
     end
   end
 
@@ -1038,6 +1122,8 @@ class AgentApp
         @thinking = false
       when :usage
         Usage.add!(@usage, ev[:usage])
+        # Latest prompt size ≈ current context fill for the meter.
+        @context_tokens = ev[:usage][:input].to_i if ev[:usage]
       when :permission_request
         @pending_permission = ev
         @mode = :permission
@@ -1055,7 +1141,8 @@ class AgentApp
   def visible_log
     suggestions = slash_suggestions
     extra = suggestions.empty? ? 0 : suggestions.length + 1
-    bottom = Usage.any?(@usage) ? 5 : 4
+    # blank + composer (3) + status bar
+    bottom = 5
 
     rendered = @log.map do |e|
       case e[:kind]
