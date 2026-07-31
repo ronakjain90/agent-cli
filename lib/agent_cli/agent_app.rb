@@ -561,6 +561,13 @@ end
       end
       @suggest_cursor = 0
       [self, nil]
+    elsif message.to_s == "alt+backspace" || message.key_type == AgentCli::InputDrain::KEY_ALT_BACKSPACE
+      # Delete the previous word (opt+delete / alt+backspace)
+      new_cursor = prev_word_boundary(@input, @cursor_pos)
+      @input = @input[0...new_cursor] + (@input[@cursor_pos..] || "")
+      @cursor_pos = new_cursor
+      @suggest_cursor = 0
+      [self, nil]
     elsif message.space?
       @input = @input[0...@cursor_pos] + " " + (@input[@cursor_pos..] || "")
       @cursor_pos += 1
@@ -1223,7 +1230,7 @@ end
       elsif slash_command_active?
         "#{@composer_key.render("tab")} #{@composer_dim.render("complete")}  #{@composer_key.render("enter")} #{@composer_dim.render("run")}"
       else
-        "#{@composer_key.render("/")} #{@composer_dim.render("commands")}  #{@composer_key.render("opt+←")} #{@composer_dim.render("word-left")}  #{@composer_key.render("opt+→")} #{@composer_dim.render("word-right")}"
+        "#{@composer_key.render("/")} #{@composer_dim.render("commands")}  #{@composer_key.render("opt+←")} #{@composer_dim.render("word-left")}  #{@composer_key.render("opt+→")} #{@composer_dim.render("word-right")}  #{@composer_key.render("opt+⌫")} #{@composer_dim.render("delete-word")}"
       end
 
     right = "#{@composer_dim.render(usage)}  #{hint}"
@@ -1333,17 +1340,37 @@ end
     [top] + body
   end
 
-  # Strip ANSI for length checks, keep rendered string otherwise.
+  # Truncate to a visible width, preserving ANSI escapes (colors) while
+  # only counting printable characters, and resetting styling at the cut.
   def truncate_display(str, width)
     return "" if width <= 0
     return str if strip_ansi(str).length <= width
 
-    # Prefer cutting the raw string when no ANSI; otherwise leave as-is.
-    if str == strip_ansi(str)
-      str[0, width]
-    else
-      str
+    out = +""
+    visible = 0
+    had_ansi = false
+    i = 0
+    n = str.length
+    while i < n
+      if str[i] == "\e" && (m = str[i..].match(/\A\e\[[0-9;]*m/))
+        out << m[0]
+        had_ansi = true
+        i += m[0].length
+      else
+        break if visible >= width
+        out << str[i]
+        visible += 1
+        i += 1
+      end
     end
+    out << "\e[0m" if had_ansi
+    out
+  end
+
+  # Right-pad to a visible width, ignoring ANSI escapes in the measurement.
+  def pad_display(str, width)
+    pad = [width - strip_ansi(str).length, 0].max
+    "#{str}#{" " * pad}"
   end
 
   def strip_ansi(str)
