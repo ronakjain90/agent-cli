@@ -148,8 +148,9 @@ module Sandbox
   end
 
   # Build the Linux bubblewrap argv: project bound read-write, system dirs
-  # read-only, fresh /tmp, network shared. Writes outside the bound project
-  # fail.
+  # read-only, fresh /tmp, network shared. Writes outside the project fail.
+  # ro-binds add no exposure beyond the user's own read permissions; --dev /dev
+  # already supplies null/zero/random/urandom.
   #
   # @param cmd [String] the shell command to run inside the sandbox
   # @return [Array<String>] a +bwrap+ argv ending in +/bin/sh -c cmd+
@@ -157,6 +158,12 @@ module Sandbox
     [
       "bwrap",
       "--die-with-parent",
+      # Isolate namespaces but keep the network shared (fetch/install still work).
+      "--unshare-pid",
+      "--unshare-ipc",
+      "--unshare-uts",
+      "--unshare-cgroup-try",
+      "--new-session", # own session: blocks TIOCSTI keystroke injection
       "--proc", "/proc",
       "--dev", "/dev",
       "--tmpfs", "/tmp",

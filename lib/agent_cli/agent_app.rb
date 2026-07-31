@@ -10,6 +10,7 @@ require_relative "settings"
 require_relative "usage"
 require_relative "commands"
 require_relative "constants"
+require_relative "agents_guard"
 
 class Poll < Bubbletea::Message; end
 
@@ -1565,9 +1566,19 @@ end
             if @claude_path_existed
               content = "@CLAUDE.md\n\n" + content
             end
-            File.write("AGENTS.md", content)
-            @log << { kind: :assistant, text: "Created AGENTS.md with project summary:" }
-            @log << { kind: :tool_result, text: content }
+            # Refuse unsafe content: AGENTS.md is auto-loaded into every session.
+            reasons = AgentsGuard.flagged(content)
+            if reasons.empty?
+              File.write("AGENTS.md", content)
+              @log << { kind: :assistant, text: "Created AGENTS.md with project summary:" }
+              @log << { kind: :tool_result, text: content }
+            else
+              @log << { kind: :assistant,
+                        text: "Refused to write AGENTS.md — generated content looks unsafe " \
+                              "(#{reasons.join("; ")}). Review it below and create the file " \
+                              "manually if it's legitimate:" }
+              @log << { kind: :tool_result, text: content }
+            end
           end
         end
         @thinking = false

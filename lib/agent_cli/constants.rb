@@ -6,3 +6,7 @@ MAX_READ_BYTES  = 100_000
 TICK_INTERVAL   = 0.08
 MAX_OUT_TOKENS  = 16_384
 MAX_LCS_LINES   = 5_000
+
+# run_command rate limit: max commands per trailing window (seconds), per session.
+COMMAND_RATE_WINDOW     = 60.0
+MAX_COMMANDS_PER_WINDOW = 60

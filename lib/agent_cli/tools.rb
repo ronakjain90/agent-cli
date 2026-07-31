@@ -14,6 +14,9 @@ module Tools
   # (the TUI can only hold one pending permission request).
   APPROVAL_MUTEX = Mutex.new
 
+  # Guards the run_command rate-limit window against parallel workers.
+  RATE_MUTEX = Mutex.new
+
   # Read-only command prefixes that are always allowed without prompting.
   # Users can extend this at runtime via the permission prompt (persisted in Preferences).
   DEFAULT_ALLOWED = [
@@ -115,6 +118,21 @@ module Tools
 
     def reset_session!
       @session_shell = false
+      RATE_MUTEX.synchronize { @command_times = [] }
+    end
+
+    # Sliding-window rate check: records now and returns true if under the cap,
+    # else returns false without recording (rejected commands don't count).
+    def rate_limit_ok?(now = Time.now.to_f)
+      RATE_MUTEX.synchronize do
+        @command_times ||= []
+        cutoff = now - COMMAND_RATE_WINDOW
+        @command_times.reject! { |t| t < cutoff }
+        return false if @command_times.length >= MAX_COMMANDS_PER_WINDOW
+
+        @command_times << now
+        true
+      end
     end
 
     def shell_permitted?
@@ -325,6 +343,13 @@ module Tools
         else
           return ["denied: #{cmd}", "User denied permission to run this shell command."]
         end
+      end
+
+      # Rate limit executions (after permission, so a denied command costs nothing).
+      unless rate_limit_ok?
+        return ["rate-limited: #{cmd}",
+                "Rate limit reached: at most #{MAX_COMMANDS_PER_WINDOW} shell commands may run " \
+                "per #{COMMAND_RATE_WINDOW.to_i} seconds. Wait a moment before running more commands."]
       end
 
       # argv runs directly (no wrapping shell); it is always sandboxed here.
