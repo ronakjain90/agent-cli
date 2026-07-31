@@ -1,7 +1,10 @@
 # frozen_string_literal: true
 
+require "open3"
+
 require_relative "diff"
 require_relative "preferences"
+require_relative "sandbox"
 
 # Capabilities exposed to the model (anthropic / openai / openrouter / google / groq / ollama providers).
 module Tools
@@ -137,7 +140,13 @@ module Tools
       tokens.first(count).join(" ")
     end
 
-    # Returns [summary_for_ui, result_string_for_model] or a 3-tuple with a diff.
+    # Dispatch a tool call by name and return its outcome.
+    #
+    # @param name [String] the tool name (e.g. +"read_file"+)
+    # @param input [Hash, nil] the tool's JSON arguments
+    # @return [Array(String, String)] +[summary_for_ui, result_for_model]+
+    # @return [Array(String, String, String)] the same, plus a unified diff, for
+    #   tools that modify a file
     def call(name, input)
       input = input || {}
       case name
@@ -145,10 +154,11 @@ module Tools
         read_file(input)
       when "write_file"
         path = require_arg!(input, "path")
+        abs = Sandbox.ensure_writable!(path)
         new_content = input["content"].to_s
-        existed = File.exist?(path)
-        old_content = existed ? File.read(path) : ""
-        File.write(path, new_content)
+        existed = File.exist?(abs)
+        old_content = existed ? File.read(abs) : ""
+        File.write(abs, new_content)
         d = Diff.unified(path, old_content, new_content)
         diff_info = d.empty? ? nil : d
         label = existed ? "wrote #{path} (#{new_content.bytesize} bytes)" : "created #{path} (#{new_content.bytesize} bytes)"
@@ -175,10 +185,17 @@ module Tools
 
     private
 
-    # Read a file, optionally just a 1-indexed inclusive line range. Ranged reads
-    # keep context small on large files (the model asks for the slice it needs
-    # instead of the whole file). Returns raw text with no line-number prefixes so
-    # snippets stay copy-pasteable into edit_file anchors.
+    # Read a file, optionally just a 1-indexed inclusive line range. Ranged
+    # reads keep context small on large files (the model asks for the slice it
+    # needs instead of the whole file). Returns raw text with no line-number
+    # prefixes so snippets stay copy-pasteable into {edit_file} anchors.
+    #
+    # @param input [Hash] tool arguments
+    # @option input [String] "path" file to read (required)
+    # @option input [Integer] "start_line" first line, 1-indexed inclusive
+    # @option input [Integer] "end_line" last line, 1-indexed inclusive
+    # @return [Array(String, String)] +[summary_for_ui, file_contents]+
+    # @raise [ArgumentError] if "path" is missing or the range is out of bounds
     def read_file(input)
       path = require_arg!(input, "path")
       body = File.read(path)
@@ -206,9 +223,20 @@ module Tools
       ["read #{path}", body]
     end
 
-    # Anchored replacement: swap an exact `old_string` for `new_string` in an
+    # Anchored replacement: swap an exact +old_string+ for +new_string+ in an
     # existing file. Keeps payloads small (only the changed snippet) and returns
     # model-actionable errors when the anchor is missing or ambiguous.
+    #
+    # @param input [Hash] tool arguments
+    # @option input [String] "path" file to edit (required)
+    # @option input [String] "old_string" exact text to find (required)
+    # @option input [String] "new_string" replacement text; empty deletes the
+    #   match (required, may be empty)
+    # @option input [Boolean] "replace_all" replace every occurrence instead of
+    #   requiring a unique match (default false)
+    # @return [Array(String, String, String)] +[summary, "ok", unified_diff]+
+    # @raise [ArgumentError] if arguments are missing, the file is outside the
+    #   project root or absent, or the anchor is not found / not unique
     def edit_file(input)
       path = require_arg!(input, "path")
       old_string = require_arg!(input, "old_string")
@@ -218,14 +246,15 @@ module Tools
       new_string  = input["new_string"].to_s
       replace_all = input["replace_all"] ? true : false
 
-      unless File.exist?(path)
+      abs = Sandbox.ensure_writable!(path)
+      unless File.exist?(abs)
         raise ArgumentError, "#{path} does not exist. Use write_file to create a new file."
       end
       if old_string == new_string
         raise ArgumentError, "old_string and new_string are identical — nothing to change."
       end
 
-      old_content = File.read(path)
+      old_content = File.read(abs)
       count = old_content.scan(old_string).length
       if count.zero?
         raise ArgumentError,
@@ -239,7 +268,7 @@ module Tools
       end
 
       new_content = replace_all ? old_content.gsub(old_string, new_string) : old_content.sub(old_string, new_string)
-      File.write(path, new_content)
+      File.write(abs, new_content)
 
       d = Diff.unified(path, old_content, new_content)
       diff_info = d.empty? ? nil : d
@@ -247,8 +276,13 @@ module Tools
       ["edited #{path} (#{n} replacement#{"s" if n != 1})", "ok", diff_info]
     end
 
-    # Fetch a required string argument, raising a model-actionable error when the
-    # model omits it (weaker models often call tools with `{}`).
+    # Fetch a required string argument, raising a model-actionable error when
+    # the model omits it (weaker models often call tools with +{}+).
+    #
+    # @param input [Hash] the tool arguments
+    # @param key [String] the required argument name
+    # @return [String] the argument's non-empty, stringified value
+    # @raise [ArgumentError] if the argument is missing or empty
     def require_arg!(input, key)
       val = input[key]
       val = val.to_s if val
@@ -258,7 +292,20 @@ module Tools
       val
     end
 
+    # Run a shell command under the OS sandbox, after any permission check.
+    # Fails closed: if no sandbox backend is available the command is refused,
+    # never run unconfined.
+    #
+    # @param cmd [String] the shell command to run
+    # @return [Array(String, String)] +[summary_for_ui, combined_output]+; the
+    #   summary is +"ran (sandboxed): …"+, +"blocked (no sandbox): …"+, or
+    #   +"denied: …"+
     def run_command(cmd)
+      # Fail closed: if no sandbox backend is available, refuse before doing
+      # anything else (including prompting) — commands are never run unconfined.
+      argv, refusal = Sandbox.wrap(cmd)
+      return ["blocked (no sandbox): #{cmd}", refusal] if argv.nil?
+
       unless shell_permitted? || auto_allowed?(cmd)
         case request_permission("run_command", cmd)
         when :always
@@ -272,8 +319,11 @@ module Tools
         end
       end
 
-      out = `#{cmd} 2>&1`
-      ["ran: #{cmd}", out.empty? ? "(no output)" : out[0, 100_000]]
+      # argv runs directly (no wrapping shell); it is always sandboxed here.
+      out, _status = Open3.capture2e(*argv)
+      out = out[0, 100_000]
+      out = "(no output)" if out.empty?
+      ["ran (sandboxed): #{cmd}", out]
     end
 
     def request_permission(tool, detail)
