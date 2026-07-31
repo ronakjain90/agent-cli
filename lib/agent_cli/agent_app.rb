@@ -80,9 +80,10 @@ class AgentApp
     @cur    = Lipgloss::Style.new.reverse(true)
     # OpenCode-style composer
     @composer_bg     = "#EDEDED"
-    @composer_fg     = Lipgloss::Style.new.foreground("#1F2328")
-    @composer_accent = Lipgloss::Style.new.foreground("#7D56F4")
+    @composer_fg     = Lipgloss::Style.new.foreground("#1F2328").background(@composer_bg)
+    @composer_accent = Lipgloss::Style.new.foreground("#7D56F4").background(@composer_bg)
     @composer_dim    = Lipgloss::Style.new.foreground("#8B949E")
+    @composer_dim_bg = Lipgloss::Style.new.foreground("#8B949E").background(@composer_bg)
     @composer_key    = Lipgloss::Style.new.foreground("#1F2328").bold(true)
     @composer_box    = Lipgloss::Style.new
       .background(@composer_bg)
@@ -1043,7 +1044,7 @@ end
     match = suggestions[@suggest_cursor]
     return "" unless match[:name].start_with?(@input) && match[:name].length > @input.length
 
-    @hint.render(match[:name][@input.length..])
+    @composer_dim_bg.render(match[:name][@input.length..])
   end
 
   def view_suggestions
@@ -1183,12 +1184,12 @@ end
     width = [@width, 40].max
     input =
       if @thinking
-        @composer_dim.render("#{SPINNER[@frame]} thinking…")
+        @composer_dim_bg.render("#{SPINNER[@frame]} thinking…")
       else
         ghost = input_ghost_suffix
         placeholder =
           if @input.empty? && slash_suggestions.empty?
-            @composer_dim.render("type a request")
+            @composer_dim_bg.render("type a request")
           else
             ""
           end
@@ -1203,14 +1204,14 @@ end
 
   def composer_meta
     mode = @composer_accent.render("Agent")
-    sep = @composer_dim.render(" · ")
+    sep = @composer_dim_bg.render(" · ")
     if @provider
       model = @composer_fg.render(@provider.model_label.to_s)
-      provider = @composer_dim.render(" #{@provider.label}")
-      worker = (w = worker_summary) ? @composer_dim.render("  ⌁ #{w}") : ""
+      provider = @composer_dim_bg.render(" #{@provider.label}")
+      worker = (w = worker_summary) ? @composer_dim_bg.render("  ⌁ #{w}") : ""
       "#{mode}#{sep}#{model}#{provider}#{worker}"
     else
-      "#{mode}#{sep}#{@composer_dim.render("no model — /providers")}"
+      "#{mode}#{sep}#{@composer_dim_bg.render("no model — /providers")}"
     end
   end
 
