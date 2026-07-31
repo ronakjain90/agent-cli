@@ -5,7 +5,7 @@ module Commands
   ALL = [
     { name: "/providers", desc: "switch provider and model" },
     { name: "/worker",    desc: "set the model workers use" },
-    { name: "/agents",    desc: "explain the manager → worker flow" },
+    { name: "/models",    desc: "manage saved model sets" },
     { name: "/help",      desc: "list available commands" }
   ].freeze
 
@@ -23,8 +23,8 @@ module Commands
       app.open_providers_picker
     when "/worker"
       app.open_worker_picker
-    when "/agents"
-      app.show_agents_help
+    when "/models"
+      app.open_models_picker
     when "/help"
       app.show_command_help
     end

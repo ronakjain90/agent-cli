@@ -57,6 +57,7 @@ class AgentApp
     @picker_from_chat = false
     @picker_target = :manager
     @pending_model_id = nil
+    @models_picker_items = []
     @suggest_cursor = 0
     @history = PromptHistory.load
     @history_index = nil
@@ -151,6 +152,7 @@ class AgentApp
       when :manual_model then update_manual_entry(message)
       when :enter_api_key then update_api_key_entry(message)
       when :permission then update_permission(message)
+      when :models_picker then update_models_picker(message)
       else update_chat(message)
       end
     else
@@ -164,6 +166,7 @@ class AgentApp
     when :manual_model then view_manual_entry
     when :enter_api_key then view_api_key_entry
     when :permission then view_permission
+    when :models_picker then view_models_picker
     else view_chat
     end
   end
@@ -212,6 +215,145 @@ class AgentApp
     @selected_provider = nil
     [self, nil]
   end
+
+def open_models_picker
+  @models_picker_items = Preferences.saved_models
+  @mode = :models_picker
+  @menu_cursor = 0
+  @menu_scroll = 0
+  [self, nil]
+end
+
+def update_models_picker(message)
+  if message.esc?
+    @mode = :chat
+    @models_picker_items = []
+    [self, nil]
+  elsif message.up? || message.to_s == "k"
+    @menu_cursor = (@menu_cursor - 1) % [@models_picker_items.length, 1].max
+    ensure_models_scroll
+    [self, nil]
+  elsif message.down? || message.to_s == "j"
+    @menu_cursor = (@menu_cursor + 1) % [@models_picker_items.length, 1].max
+    ensure_models_scroll
+    [self, nil]
+  elsif message.enter?
+    confirm_model_set
+  else
+    [self, nil]
+  end
+end
+
+def ensure_models_scroll
+  budget = models_menu_budget
+  return if @models_picker_items.empty?
+
+  if @menu_cursor < @menu_scroll
+    @menu_scroll = @menu_cursor
+  elsif @menu_cursor >= @menu_scroll + budget
+    @menu_scroll = @menu_cursor - budget + 1
+  end
+  max_scroll = [@models_picker_items.length - budget, 0].max
+  @menu_scroll = [[@menu_scroll, 0].max, max_scroll].min
+end
+
+def models_menu_budget
+  [@height - 4, 3].max
+end
+
+def confirm_model_set
+  item = @models_picker_items[@menu_cursor]
+  return [self, nil] unless item
+
+  Preferences.apply_model_set(item)
+
+  # Rebuild the provider from the applied settings
+  @provider = nil
+  prefs = Preferences.load
+  if prefs && (meta = Provider.find(prefs[:provider]))
+    begin
+      @provider = meta.build(prefs[:model])
+      Provider.attach_worker(@provider, prefs[:provider])
+      @messages = []
+      @usage = Usage.blank
+      @context_tokens = 0
+    rescue Settings::MissingApiKeyError => e
+      @mode = :enter_api_key
+      @api_key_input = ""
+      @api_key_error = nil
+      [self, nil]
+    rescue => e
+      @picker_error = e.message
+      [self, nil]
+    end
+  end
+
+  @mode = :chat
+  @models_picker_items = []
+  @log << ready_message
+  [self, nil]
+end
+
+def view_models_picker
+  lines = [@bot.render("Saved Model Sets")]
+
+  if @models_picker_items.empty?
+    lines << @hint.render("  no saved models  -  configure one with /providers")
+    lines << ""
+    lines << @hint.render("  esc back to chat | ctrl+c quit")
+    return lines.join("\n")
+  end
+
+  budget = models_menu_budget
+  visible = @models_picker_items[@menu_scroll, budget] || []
+
+  # Align the name column to the widest visible name (capped) so the
+  # labeled model details line up.
+  name_width = visible.map { |e| e["name"].to_s.length }.max.to_i
+  name_width = [[name_width, 24].min, 6].max
+
+  visible.each_with_index do |entry, i|
+    idx = @menu_scroll + i
+    selected = idx == @menu_cursor
+    prefix = selected ? "> " : "  "
+
+    mgr_provider = entry["provider"]
+    mgr_model = entry["model"]
+    wk_provider = entry["worker_provider"]
+    wk_model = entry["worker_model"]
+
+    manager_text = "#{mgr_provider}:#{mgr_model}"
+    worker_text = "#{wk_provider || mgr_provider}:#{wk_model}"
+
+    name = entry["name"].to_s.ljust(name_width)
+    text = "#{name}  mgr #{manager_text}"
+    # Only show the worker column when it actually differs from the manager.
+    if wk_model && !wk_model.to_s.empty? && worker_text != manager_text
+      text << " · wkr #{worker_text}"
+    end
+
+    lines << (selected ? @you.render("#{prefix}#{text}") : @hint.render("#{prefix}#{text}"))
+  end
+
+  lines << ""
+  lines << @hint.render("up/down move | enter apply | esc back | ctrl+c quit")
+  lines.join("\n")
+end
+
+def offer_save_model_set
+  return unless @provider
+  return unless @picker_from_chat == false
+
+  prefs = Preferences.load
+  return unless prefs
+
+  existing = Preferences.save_model_set(
+    nil, prefs[:provider], prefs[:model],
+    worker_provider: prefs[:worker_provider],
+    worker_model: prefs[:worker_model]
+  )
+  @log << { kind: :tool_result, text: "  saved as model set \"#{existing['name']}\"" }
+end
 
   def show_command_help
     @log << { kind: :assistant, text: "Available commands:" }
@@ -523,6 +665,7 @@ class AgentApp
     unless was_chat
       @log << { kind: :assistant, text: "Ask me to read, write, or run something. Type /providers to switch." }
     end
+    offer_save_model_set
     [self, nil]
   rescue Settings::MissingApiKeyError => e
     @pending_model_id = model_id
