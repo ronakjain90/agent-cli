@@ -28,6 +28,7 @@ module AgentCli
     KEY_ALT_RIGHT   = -101
     KEY_CTRL_LEFT   = -102
     KEY_CTRL_RIGHT  = -103
+    KEY_ALT_BACKSPACE  = -104
 
     module_function
 
@@ -188,6 +189,12 @@ module AgentCli
       end
 
       # macOS Terminal sends ESC b / ESC f for opt+left / opt+right (bash readline defaults).
+      # opt+delete: ESC followed by 0x7f (backspace). Terminal sends this as
+      # two bytes, not as an escape sequence like the arrow keys above.
+      if rest.bytesize >= 2 && rest.getbyte(1) == 0x7f
+        return [key_event(KEY_ALT_BACKSPACE, "alt+backspace"), 2]
+      end
+
       if rest.bytesize >= 2 && rest.getbyte(1).between?(32, 126)
         r = rest.getbyte(1)
         case r
