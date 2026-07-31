@@ -96,6 +96,8 @@ module Tools
     }
   ].freeze
 
+  COMMAND_ALIASES = %w[shell bash sh zsh run_shell run_bash execute exec terminal command].freeze
+
   class << self
     # Callable that receives (tool_name, detail) and returns :allow, :always, or :deny.
     # Set by the TUI so the worker thread can block until the user answers.
@@ -149,6 +151,7 @@ module Tools
     #   tools that modify a file
     def call(name, input)
       input = input || {}
+      name = "run_command" if COMMAND_ALIASES.include?(name)
       case name
       when "read_file"
         read_file(input)
@@ -174,7 +177,10 @@ module Tools
       when "run_command"
         run_command(require_arg!(input, "command"))
       else
-        ["unknown tool #{name}", "Error: unknown tool #{name}"]
+        valid = DEFINITIONS.map { |d| d[:name] }.join(", ")
+        ["unknown tool #{name}",
+         "Error: unknown tool `#{name}`. Available tools: #{valid}. " \
+         "To run a shell command, call `run_command` with a `command` argument."]
       end
     rescue ArgumentError => e
       # Missing/invalid tool arguments: report back so the model can retry correctly.
