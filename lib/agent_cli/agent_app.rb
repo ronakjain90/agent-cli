@@ -1166,15 +1166,18 @@ end
     suggestions = view_suggestions
     lines = visible_log
 
-    content = lines
-    if suggestions.any?
-      content += [""] + suggestions
-    end
-    content += [""] + composer_lines + [status_bar_line]
+    # The chat box (composer + status bar) is a full-width footer, pinned to the
+    # bottom across the entire screen.
+    footer = composer_lines + [status_bar_line]
+
+    # Everything above the footer: the conversation log plus any suggestions.
+    body = lines
+    body += [""] + suggestions if suggestions.any?
 
     if @diffs.any? && @width >= 80
-      layout_with_diff_panel(content)
+      layout_with_diff_panel(body, footer)
     else
+      content = body + [""] + footer
       padding = [@height - content.length, 0].max
       ([""] * padding + content).join("\n")
     end
@@ -1276,30 +1279,41 @@ end
     @hint.render(text)
   end
 
-  # Chat fills the screen; diff panel overlays the top-right corner.
-  # The screen is split into two clean halves separated by a single column.
-  def layout_with_diff_panel(content)
+  # Screen layout when diffs are present:
+  #
+  #   ┌───────────────┬──────────────┐
+  #   │  chat log     │  diff window │   <- top region, split into two columns
+  #   ├───────────────┴──────────────┤
+  #   │  chat box (composer + status) │   <- full-width footer, pinned to bottom
+  #   └───────────────────────────────┘
+  #
+  # +body+ is the conversation log (left column, bottom-pinned); +footer+ spans
+  # the full width underneath both columns.
+  def layout_with_diff_panel(body, footer)
     panel_w = @width / 2
     chat_w  = @width - panel_w - 1
-    panel_h = [[(@height * 0.55).to_i, 12].max, @height - 6].min
 
-    panel_lines = render_diff_panel(panel_w, panel_h)
-    chat_lines = content.map { |line| truncate_display(line.to_s, chat_w) }
+    # Reserve a blank spacer row between the top region and the chat box.
+    gap = 1
+    top_h = [@height - footer.length - gap, 1].max
 
-    # Pin chat to the bottom of the left column (same as before).
-    left_budget = @height
-    left = ([""] * [left_budget - chat_lines.length, 0].max) + chat_lines.last(left_budget)
+    panel_lines = render_diff_panel(panel_w, top_h)
+    chat_lines = body.map { |line| truncate_display(line.to_s, chat_w) }
 
-    rows = left.each_with_index.map do |chat_line, i|
-      left_col = truncate_display(chat_line, chat_w)
-      if i < panel_lines.length
-        "#{pad_display(left_col, chat_w)} #{panel_lines[i]}"
+    # Pin the chat log to the bottom of the top-left region.
+    left = ([""] * [top_h - chat_lines.length, 0].max) + chat_lines.last(top_h)
+
+    rows = (0...top_h).map do |i|
+      left_col = truncate_display(left[i].to_s, chat_w)
+      panel_col = panel_lines[i]
+      if panel_col
+        "#{pad_display(left_col, chat_w)} #{panel_col}"
       else
         left_col
       end
     end
 
-    rows.join("\n")
+    (rows + ([""] * gap) + footer).join("\n")
   end
 
   def render_diff_panel(width, height)
@@ -1321,7 +1335,7 @@ end
       end
 
     raw = diff.split("\n")
-    body = raw.first([height - 2, 1].max).map do |line|
+    body = raw.first([height - 1, 1].max).map do |line|
       clipped = line.byteslice(0, width - 2).to_s
       styled =
         if line.start_with?("@@")
@@ -1339,7 +1353,11 @@ end
     end
 
     top = "#{border_style.render("┌")}#{header_style.render(" #{title} ".ljust([width - 1, 0].max))}"
-    [top] + body
+    lines = [top] + body
+    # Pad to the full height with border-only rows so the divider between the
+    # chat log and the diff window is continuous, top to bottom.
+    lines << border_style.render("│") while lines.length < height
+    lines.first(height)
   end
 
   # Truncate to a visible width, preserving ANSI escapes (colors) while
