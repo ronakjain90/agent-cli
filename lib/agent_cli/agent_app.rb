@@ -433,6 +433,12 @@ end
 
   private
 
+  def sanitize_agents_content(content)
+    cleaned = content.gsub(/\A\s*(?:Here is the AGENTS\.md file[:\s]*|Sure, here['\s]s the content[:\s]*|Here['\s]s the content[:\s]*|Below is the AGENTS\.md[:\s]*)\n*/i, "")
+    cleaned = cleaned.gsub(/\n*\s*(?:I hope this helps!|Let me know if you need anything else\.|Feel free to ask if you need more\.|Happy to help further\.)\s*\z/i, "")
+    cleaned.strip + "\n"
+  end
+
   def ready_message
     text = "Coding agent ready — provider: #{@provider.label} · model: #{@provider.model_label}"
     if (w = worker_summary)
@@ -1554,7 +1560,7 @@ end
           # Find the last assistant message (the LLM's response)
           assistant_msg = @log.reverse.find { |e| e[:kind] == :assistant && e != @log[-2] }
           if assistant_msg && assistant_msg[:text]
-            content = assistant_msg[:text]
+            content = sanitize_agents_content(assistant_msg[:text])
             # If CLAUDE.md existed, prepend a reference to it
             if @claude_path_existed
               content = "@CLAUDE.md\n\n" + content
