@@ -78,6 +78,10 @@ module Agents
     }
   }.freeze
 
+  # Project context file, loaded into the manager's system prompt at the start
+  # of a session so the model knows the repo conventions up front.
+  AGENTS_FILE = "AGENTS.md"
+
   module_function
 
   # Base tools every agent gets, plus `delegate` while below the depth cap.
@@ -87,8 +91,29 @@ module Agents
     tools
   end
 
+  # System prompt for a given depth. The manager (depth 0) additionally gets the
+  # project's AGENTS.md appended, so session context travels with every turn.
   def system_for(depth)
-    depth.zero? ? MANAGER_SYSTEM : WORKER_SYSTEM
+    return WORKER_SYSTEM unless depth.zero?
+
+    [MANAGER_SYSTEM, agents_context].compact.join("\n")
+  end
+
+  # AGENTS.md wrapped for the system prompt, or nil when the file is absent or
+  # empty. Read fresh each turn so edits to the file take effect immediately.
+  def agents_context
+    return nil unless File.file?(AGENTS_FILE)
+
+    content = File.read(AGENTS_FILE).strip
+    return nil if content.empty?
+
+    <<~TXT
+      Project context from #{AGENTS_FILE} (follow these conventions):
+
+      #{content}
+    TXT
+  rescue SystemCallError
+    nil
   end
 end
 
