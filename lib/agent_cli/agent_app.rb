@@ -538,6 +538,22 @@ end
       @cursor_pos = [@cursor_pos + 1, @input.length].min
       @suggest_cursor = 0
       [self, nil]
+    elsif message.to_s == "alt+left" || message.key_type == AgentCli::InputDrain::KEY_ALT_LEFT
+      @cursor_pos = prev_word_boundary(@input, @cursor_pos)
+      @suggest_cursor = 0
+      [self, nil]
+    elsif message.to_s == "alt+right" || message.key_type == AgentCli::InputDrain::KEY_ALT_RIGHT
+      @cursor_pos = next_word_boundary(@input, @cursor_pos)
+      @suggest_cursor = 0
+      [self, nil]
+    elsif message.to_s == "ctrl+left" || message.key_type == AgentCli::InputDrain::KEY_CTRL_LEFT
+      @cursor_pos = prev_word_boundary(@input, @cursor_pos)
+      @suggest_cursor = 0
+      [self, nil]
+    elsif message.to_s == "ctrl+right" || message.key_type == AgentCli::InputDrain::KEY_CTRL_RIGHT
+      @cursor_pos = next_word_boundary(@input, @cursor_pos)
+      @suggest_cursor = 0
+      [self, nil]
     elsif message.backspace?
       if @cursor_pos > 0
         @input = @input[0...@cursor_pos - 1] + (@input[@cursor_pos..] || "")
@@ -829,6 +845,8 @@ end
     return nil unless message.is_a?(Bubbletea::KeyMessage)
     return nil if message.ctrl? || message.enter? || message.backspace? || message.esc?
     return nil if message.up? || message.down? || message.left? || message.right?
+    return nil if message.to_s == "alt+left" || message.to_s == "alt+right"
+    return nil if message.to_s == "ctrl+left" || message.to_s == "ctrl+right"
     return nil if message.tab?
 
     if message.runes?
@@ -840,6 +858,56 @@ end
     return s if s.length == 1 && s.match?(/\A[[:print:]]\z/)
 
     nil
+  end
+
+  # Move cursor to the start of the previous word (whitespace-delimited).
+  def prev_word_boundary(text, pos)
+    return 0 if pos <= 0
+
+    # Skip over any trailing whitespace/non-word chars at current position.
+    scan = pos - 1
+    while scan >= 0 && text[scan] =~ /\s/
+      scan -= 1
+    end
+
+    # Now skip the word (non-whitespace) backwards.
+    while scan >= 0 && text[scan] !~ /\s/
+      scan -= 1
+    end
+
+    # pos is now just after the last whitespace before the word (or -1).
+    (scan + 1).clamp(0, text.length)
+  end
+
+  # Move cursor to the start of the next word (whitespace-delimited).
+  def next_word_boundary(text, pos)
+    return text.length if pos >= text.length
+
+    len = text.length
+    scan = pos
+
+    # Skip leading whitespace from current position.
+    while scan < len && text[scan] =~ /\s/
+      scan += 1
+    end
+
+    # If we're already past a word, skip it first.
+    if pos < len && text[pos] !~ /\s/
+      while scan < len && text[scan] !~ /\s/
+        scan += 1
+      end
+      # Skip trailing whitespace to land at the start of the next word.
+      while scan < len && text[scan] =~ /\s/
+        scan += 1
+      end
+    else
+      # We were on whitespace; skip to the next word start.
+      while scan < len && text[scan] =~ /\s/
+        scan += 1
+      end
+    end
+
+    scan.clamp(0, text.length)
   end
 
   def confirm_api_key
@@ -1155,7 +1223,7 @@ end
       elsif slash_command_active?
         "#{@composer_key.render("tab")} #{@composer_dim.render("complete")}  #{@composer_key.render("enter")} #{@composer_dim.render("run")}"
       else
-        "#{@composer_key.render("/")} #{@composer_dim.render("commands")}"
+        "#{@composer_key.render("/")} #{@composer_dim.render("commands")}  #{@composer_key.render("opt+←")} #{@composer_dim.render("word-left")}  #{@composer_key.render("opt+→")} #{@composer_dim.render("word-right")}"
       end
 
     right = "#{@composer_dim.render(usage)}  #{hint}"
@@ -1200,10 +1268,11 @@ end
   end
 
   # Chat fills the screen; diff panel overlays the top-right corner.
+  # The screen is split into two clean halves separated by a single column.
   def layout_with_diff_panel(content)
-    panel_w = [[(@width * 0.42).to_i, 48].max, @width - 24].min
+    panel_w = @width / 2
+    chat_w  = @width - panel_w - 1
     panel_h = [[(@height * 0.55).to_i, 12].max, @height - 6].min
-    chat_w = @width - panel_w - 1
 
     panel_lines = render_diff_panel(panel_w, panel_h)
     chat_lines = content.map { |line| truncate_display(line.to_s, chat_w) }
@@ -1213,11 +1282,11 @@ end
     left = ([""] * [left_budget - chat_lines.length, 0].max) + chat_lines.last(left_budget)
 
     rows = left.each_with_index.map do |chat_line, i|
+      left_col = truncate_display(chat_line, chat_w)
       if i < panel_lines.length
-        left_pad = truncate_display(chat_line, chat_w).ljust(chat_w)
-        "#{left_pad} #{panel_lines[i]}"
+        "#{pad_display(left_col, chat_w)} #{panel_lines[i]}"
       else
-        truncate_display(chat_line, @width)
+        left_col
       end
     end
 

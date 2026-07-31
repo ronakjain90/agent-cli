@@ -20,6 +20,14 @@ module AgentCli
     KEY_HOME      = -6
     KEY_END       = -7
     KEY_DELETE    = -10
+    KEY_PAGE_UP   = -8
+    KEY_PAGE_DOWN = -9
+    KEY_INSERT    = -11
+    KEY_SHIFT_TAB = -24
+    KEY_ALT_LEFT    = -100
+    KEY_ALT_RIGHT   = -101
+    KEY_CTRL_LEFT   = -102
+    KEY_CTRL_RIGHT  = -103
 
     module_function
 
@@ -163,21 +171,33 @@ module AgentCli
       rest = data.byteslice(i..-1).to_s
 
       case rest
-      when /\A\e\[A/  then return [key_event(KEY_UP, "up"), 3]
-      when /\A\e\[B/  then return [key_event(KEY_DOWN, "down"), 3]
-      when /\A\e\[C/  then return [key_event(KEY_RIGHT, "right"), 3]
-      when /\A\e\[D/  then return [key_event(KEY_LEFT, "left"), 3]
-      when /\A\e\[H/  then return [key_event(KEY_HOME, "home"), 3]
-      when /\A\e\[F/  then return [key_event(KEY_END, "end"), 3]
-      when /\A\e\[1~/ then return [key_event(KEY_HOME, "home"), 4]
-      when /\A\e\[4~/ then return [key_event(KEY_END, "end"), 4]
-      when /\A\e\[3~/ then return [key_event(KEY_DELETE, "delete"), 4]
-      when /\A\e\[Z/  then return [key_event(-24, "shift+tab"), 3]
+      when /\A\e\[A/        then return [key_event(KEY_UP, "up"), 3]
+      when /\A\e\[B/        then return [key_event(KEY_DOWN, "down"), 3]
+      when /\A\e\[C/        then return [key_event(KEY_RIGHT, "right"), 3]
+      when /\A\e\[D/        then return [key_event(KEY_LEFT, "left"), 3]
+      when /\A\e\[H/        then return [key_event(KEY_HOME, "home"), 3]
+      when /\A\e\[F/        then return [key_event(KEY_END, "end"), 3]
+      when /\A\e\[1~/       then return [key_event(KEY_HOME, "home"), 4]
+      when /\A\e\[4~/       then return [key_event(KEY_END, "end"), 4]
+      when /\A\e\[3~/       then return [key_event(KEY_DELETE, "delete"), 4]
+      when /\A\e\[Z/        then return [key_event(-24, "shift+tab"), 3]
+      when /\A\e\[1;3C/    then return [key_event(KEY_ALT_RIGHT, "alt+right"), 6]
+      when /\A\e\[1;3D/    then return [key_event(KEY_ALT_LEFT, "alt+left"), 6]
+      when /\A\e\[1;5C/    then return [key_event(KEY_CTRL_RIGHT, "ctrl+right"), 6]
+      when /\A\e\[1;5D/    then return [key_event(KEY_CTRL_LEFT, "ctrl+left"), 6]
       end
 
+      # macOS Terminal sends ESC b / ESC f for opt+left / opt+right (bash readline defaults).
       if rest.bytesize >= 2 && rest.getbyte(1).between?(32, 126)
         r = rest.getbyte(1)
-        return [rune_event(r.chr, alt: true), 2]
+        case r
+        when 98  # 'b' — opt+left (backward-word)
+          return [key_event(KEY_ALT_LEFT, "alt+left"), 2]
+        when 102 # 'f' — opt+right (forward-word)
+          return [key_event(KEY_ALT_RIGHT, "alt+right"), 2]
+        else
+          return [rune_event(r.chr, alt: true), 2]
+        end
       end
 
       [key_event(KEY_ESC, "esc"), 1]
