@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "constants"
+
 # Minimal unified-diff generator for write_file changes.
 # test diff
 module Diff
@@ -18,7 +20,7 @@ module Diff
     m = a.length
     n = b.length
     # Cap to keep memory reasonable for huge files.
-    if m > 5_000 || n > 5_000
+    if m > MAX_LCS_LINES || n > MAX_LCS_LINES
       return coarse_ses(a, b)
     end
 

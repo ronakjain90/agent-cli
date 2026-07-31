@@ -9,6 +9,7 @@ require_relative "prompt_history"
 require_relative "settings"
 require_relative "usage"
 require_relative "commands"
+require_relative "constants"
 
 class Poll < Bubbletea::Message; end
 
@@ -1518,7 +1519,7 @@ end
   end
 
   def tick
-    Bubbletea.tick(0.08) { Poll.new }
+    Bubbletea.tick(TICK_INTERVAL) { Poll.new }
   end
 
   def drain_events

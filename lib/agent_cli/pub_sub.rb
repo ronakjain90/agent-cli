@@ -27,7 +27,7 @@ module PubSub
 
     def notify(channel, payload)
       block.call(channel, payload)
-    rescue => e
+    rescue StandardError => e
       warn "[PubSub Error] Subscriber #{id} failed on channel #{channel}: #{e.message}"
     end
   end

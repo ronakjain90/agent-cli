@@ -89,7 +89,6 @@ end
 class OllamaProvider < OpenaiProvider
   # Local models often need more wall-clock time than cloud APIs.
   READ_TIMEOUT = 300
-  MAX_OUT_TOKENS = 16_384
 
   def initialize(base_url:, model:)
     @model = model

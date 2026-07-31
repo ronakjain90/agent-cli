@@ -58,9 +58,6 @@ class OpenaiProvider
     @model
   end
 
-  # OpenAI chat completions reject huge max_tokens; keep room for tool loops.
-  MAX_OUT_TOKENS = 16_384
-
   # Top-level user turn: run the manager agent, then signal completion.
   def run_turn(messages, events)
     agent_run(messages, events, system: Agents.system_for(0), tools: Agents.tools_for(0), depth: 0)

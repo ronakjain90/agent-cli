@@ -2,9 +2,11 @@
 
 require "open3"
 
+require_relative "constants"
 require_relative "diff"
 require_relative "preferences"
 require_relative "sandbox"
+require_relative "errors"
 
 # Capabilities exposed to the model (anthropic / openai / openrouter / google / groq / ollama providers).
 module Tools
@@ -225,7 +227,7 @@ module Tools
         return ["read #{path} (lines #{s}-#{e})", header + slice]
       end
 
-      body = body[0, 100_000] + "\n…[truncated]" if body.bytesize > 100_000
+      body = body[0, MAX_READ_BYTES] + "\n…[truncated]" if body.bytesize > MAX_READ_BYTES
       ["read #{path}", body]
     end
 
@@ -327,7 +329,7 @@ module Tools
 
       # argv runs directly (no wrapping shell); it is always sandboxed here.
       out, _status = Open3.capture2e(*argv)
-      out = out[0, 100_000]
+      out = out[0, MAX_READ_BYTES]
       out = "(no output)" if out.empty?
       ["ran (sandboxed): #{cmd}", out]
     end
