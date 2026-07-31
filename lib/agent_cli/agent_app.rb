@@ -363,6 +363,54 @@ end
     [self, nil]
   end
 
+  def handle_init
+    agents_path = "AGENTS.md"
+    claude_path = "CLAUDE.md"
+
+    if File.exist?(agents_path)
+      content = File.read(agents_path)
+      @log << { kind: :assistant, text: "AGENTS.md already exists:" }
+      @log << { kind: :tool_result, text: content }
+      return [self, nil]
+    end
+
+    # If CLAUDE.md exists, reference it but also add a project summary
+    if File.exist?(claude_path)
+      @log << { kind: :assistant, text: "Found CLAUDE.md — generating project summary for AGENTS.md…" }
+    else
+      @log << { kind: :assistant, text: "Analyzing project to generate AGENTS.md…" }
+    end
+
+    @thinking = true
+    @input = ""
+    @cursor_pos = 0
+
+    # Build a prompt asking the LLM to summarize the project
+    summary_prompt = <<~PROMPT
+      Analyze this codebase and write a concise AGENTS.md file that summarizes:
+      1. What this project does (purpose, main features)
+      2. Key architecture/components
+      3. How to run/test it
+      4. Important conventions or patterns used
+      5. Any agent-specific guidance for working in this repo
+
+      Output ONLY the AGENTS.md content in Markdown format. Do not include explanations.
+    PROMPT
+
+    @messages << { "role" => "user", "content" => summary_prompt }
+    @log << { kind: :user, text: summary_prompt }
+
+    @worker_thread = Thread.new(@messages.dup, @events) do |msgs, events|
+      @provider.run_turn(msgs, events)
+    end
+
+    # We'll intercept the response in drain_events to write AGENTS.md
+    @pending_init = true
+    @claude_path_existed = File.exist?(claude_path)
+
+    [self, tick]
+  end
+
   def show_agents_help
     @log << { kind: :assistant, text: "Manager → worker multi-agent flow:" }
     [
@@ -1383,6 +1431,22 @@ end
       when :done
         if @pending_permission
           reply_permission(:deny)
+        end
+        # If we were generating AGENTS.md, capture the assistant response and write it
+        if @pending_init
+          @pending_init = false
+          # Find the last assistant message (the LLM's response)
+          assistant_msg = @log.reverse.find { |e| e[:kind] == :assistant && e != @log[-2] }
+          if assistant_msg && assistant_msg[:text]
+            content = assistant_msg[:text]
+            # If CLAUDE.md existed, prepend a reference to it
+            if @claude_path_existed
+              content = "@CLAUDE.md\n\n" + content
+            end
+            File.write("AGENTS.md", content)
+            @log << { kind: :assistant, text: "Created AGENTS.md with project summary:" }
+            @log << { kind: :tool_result, text: content }
+          end
         end
         @thinking = false
       when :usage

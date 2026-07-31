@@ -117,8 +117,16 @@ class OpenaiProvider
       messages << assistant_msg
 
       calls = tool_calls.map do |tc|
+        fn  = tc["function"] || {}
+        raw = fn["arguments"].to_s
+        parsed = raw.strip.empty? ? {} : JSON.parse(raw)
+        { id: tc["id"], name: fn["name"], input: parsed }
+      rescue JSON::ParserError => e
+        # Weak models often emit malformed JSON for large payloads (e.g. a
+        # write_file `content` full of code). Don't swallow it into `{}` — that
+        # silently drops the edit. Surface it so the model re-issues valid JSON.
         fn = tc["function"] || {}
-        { id: tc["id"], name: fn["name"], input: (JSON.parse(fn["arguments"]) rescue {}) }
+        { id: tc["id"], name: fn["name"], parse_error: e.message }
       end
       run_tool_batch(calls, events, depth).each do |r|
         messages << { "role" => "tool", "tool_call_id" => r[:id], "content" => r[:result] }

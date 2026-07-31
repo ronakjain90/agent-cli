@@ -26,7 +26,8 @@ module Agents
     self-contained subtask to a fresh worker agent with its own tools.
 
     How to work:
-    - For small or quick tasks, just use the tools yourself.
+    - For small or quick tasks, just use the tools yourself. To change an existing file, use
+      `edit_file` with an exact snippet — reserve `write_file` for creating new files.
     - For larger tasks, split the work into independent subtasks and `delegate` each one.
       A worker does NOT see this conversation, so its brief must be complete on its own:
       say exactly what to do, which files/paths are involved, and what to report back.
@@ -43,7 +44,8 @@ module Agents
   WORKER_SYSTEM = <<~TXT
     You are a worker agent working in the user's current directory. You have been given ONE
     focused subtask by your manager. Use the tools to inspect and modify files and run commands.
-    Prefer reading before writing.
+    Prefer reading before writing. To change an existing file, use `edit_file` with an exact
+    snippet copied verbatim from the file — do NOT rewrite the whole file with `write_file`.
 
     Rules:
     - Stay strictly within your assigned subtask — do not expand the scope.
@@ -118,6 +120,20 @@ module Delegation
     end
   end
 
+  # Run one call, short-circuiting calls whose arguments failed to parse so the
+  # model gets an actionable error (and the tool never runs with empty input).
+  def run_call(call, events, depth)
+    if (err = call[:parse_error])
+      return [
+        "#{call[:name]}: invalid arguments",
+        "Error: could not parse the JSON arguments for #{call[:name]} (#{err}). " \
+        "Re-issue the call with valid JSON — make sure every string is properly " \
+        "escaped (quotes, newlines, backslashes)."
+      ]
+    end
+    dispatch_tool(call[:name], call[:input], events, depth)
+  end
+
   # Execute one assistant turn's tool calls and return per-call results in the
   # original order as [{ id:, result: }, ...]. When a turn contains two or more
   # `delegate` calls, those workers run concurrently (capped at MAX_PARALLEL);
@@ -132,15 +148,15 @@ module Delegation
     if delegate_positions.length < 2
       # Sequential: announce each call, run it, emit its result inline.
       return calls.map do |c|
-        events << { kind: :tool, text: "#{c[:name]} #{JSON.generate(c[:input])}", depth: depth }
-        emit_tool_result(events, c, dispatch_tool(c[:name], c[:input], events, depth), depth)
+        events << { kind: :tool, text: announce_text(c), depth: depth }
+        emit_tool_result(events, c, run_call(c, events, depth), depth)
       end
     end
 
     # Parallel fan-out. Announce every call up front so the UI shows all the
     # delegations before their interleaved worker logs stream in.
     calls.each do |c|
-      events << { kind: :tool, text: "#{c[:name]} #{JSON.generate(c[:input])}", depth: depth }
+      events << { kind: :tool, text: announce_text(c), depth: depth }
     end
 
     outcomes = Array.new(calls.length)
@@ -148,7 +164,7 @@ module Delegation
     # Non-delegate tools run inline (they touch the filesystem/shell serially).
     (0...calls.length).each do |i|
       next if delegate_positions.include?(i)
-      outcomes[i] = Tools.call(calls[i][:name], calls[i][:input] || {})
+      outcomes[i] = run_call(calls[i], events, depth)
     end
 
     # Delegates run concurrently, in capped slices.
@@ -162,6 +178,12 @@ module Delegation
   end
 
   private
+
+  # UI text announcing a tool call. Parse-failed calls have no usable input.
+  def announce_text(call)
+    return "#{call[:name]} (unparseable arguments)" if call[:parse_error]
+    "#{call[:name]} #{JSON.generate(call[:input])}"
+  end
 
   def emit_tool_result(events, call, outcome, depth)
     summary, result, diff = outcome

@@ -6,6 +6,7 @@ module Commands
     { name: "/providers", desc: "switch provider and model" },
     { name: "/worker",    desc: "set the model workers use" },
     { name: "/models",    desc: "manage saved model sets" },
+    { name: "/init",      desc: "read or create AGENTS.md (references CLAUDE.md if present)" },
     { name: "/help",      desc: "list available commands" }
   ].freeze
 
@@ -25,6 +26,8 @@ module Commands
       app.open_worker_picker
     when "/models"
       app.open_models_picker
+    when "/init"
+      app.handle_init
     when "/help"
       app.show_command_help
     end
