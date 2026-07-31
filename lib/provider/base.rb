@@ -27,7 +27,7 @@ class Provider
       provider = find(kind.to_sym)
       abort "Unknown AGENT_PROVIDER #{ENV["AGENT_PROVIDER"].inspect} (expected 'anthropic', 'openai', 'openrouter', 'google', 'groq', 'ollama', or 'opencode')." unless provider
 
-      provider.build_from_env
+      attach_worker(provider.build_from_env, kind.to_sym)
     rescue => e
       abort e.message
     end
@@ -39,7 +39,53 @@ class Provider
       provider = find(prefs[:provider])
       return nil unless provider
 
-      provider.build(prefs[:model])
+      attach_worker(provider.build(prefs[:model]), prefs[:provider])
+    end
+
+    # Build the configured worker provider (its own model, possibly its own
+    # provider/API key) and attach it to the manager. On any problem — no
+    # worker configured, unknown provider, missing key, or a provider that
+    # can't run our loop (opencode) — workers simply reuse the manager's model.
+    def attach_worker(manager, default_provider_id)
+      return manager unless manager.respond_to?(:worker_provider=)
+
+      provider_id, model_id = worker_target(default_provider_id)
+      return manager if model_id.nil? || model_id.to_s.empty?
+
+      meta = find(provider_id)
+      return manager unless meta
+
+      worker = meta.build(model_id)
+      return manager unless worker.respond_to?(:agent_run)
+      return manager if same_target?(manager, worker)
+
+      manager.worker_provider = worker
+      manager
+    rescue
+      manager
+    end
+
+    # Worker [provider_id, model_id] from env (AGENT_WORKER_PROVIDER /
+    # AGENT_WORKER_MODEL) or preferences. Provider defaults to the manager's.
+    def worker_target(default_provider_id)
+      env_model = ENV["AGENT_WORKER_MODEL"]
+      unless env_model.nil? || env_model.empty?
+        env_prov = ENV["AGENT_WORKER_PROVIDER"]
+        pid = env_prov.nil? || env_prov.empty? ? default_provider_id : env_prov.to_sym
+        return [pid, env_model]
+      end
+
+      prefs = Preferences.load
+      if prefs && prefs[:worker_model]
+        return [prefs[:worker_provider] || prefs[:provider] || default_provider_id, prefs[:worker_model]]
+      end
+
+      [nil, nil]
+    end
+
+    # True when the worker resolves to the same provider + model as the manager.
+    def same_target?(manager, worker)
+      manager.label == worker.label && manager.model_label == worker.model_label
     end
 
     # Returns [runtime_provider, startup_error_message]

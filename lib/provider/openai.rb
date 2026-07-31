@@ -6,6 +6,7 @@ require "uri"
 
 require_relative "../agent_cli/constants"
 require_relative "../agent_cli/tools"
+require_relative "../agent_cli/agents"
 require_relative "../agent_cli/usage"
 require_relative "base"
 
@@ -36,11 +37,10 @@ end
 
 # OpenAI Chat Completions API with function calling.
 class OpenaiProvider
-  SYSTEM = <<~TXT
-    You are a coding agent working in the user's current directory.
-    Use the provided tools to inspect and modify files and to run commands.
-    Prefer reading before writing. Keep prose brief; let the tools do the work.
-  TXT
+  include Delegation
+
+  # Default system prompt when no agent role is active (kept for compatibility).
+  SYSTEM = Agents::MANAGER_SYSTEM
 
   attr_reader :model
 
@@ -61,18 +61,34 @@ class OpenaiProvider
   # OpenAI chat completions reject huge max_tokens; keep room for tool loops.
   MAX_OUT_TOKENS = 16_384
 
+  # Top-level user turn: run the manager agent, then signal completion.
   def run_turn(messages, events)
+    agent_run(messages, events, system: Agents.system_for(0), tools: Agents.tools_for(0), depth: 0)
+  ensure
+    events << { kind: :done }
+  end
+
+  # One agent (manager at depth 0, worker at depth >= 1). Returns the final
+  # assistant text so a manager can read a worker's report. `post` reads the
+  # active system/tools set here (subclasses keep a single-arg `post`).
+  def agent_run(messages, events, system:, tools:, depth:)
+    final_text = nil
+
     MAX_STEPS.times do
+      # Thread-local so parallel workers (possibly at different depths) don't
+      # clobber each other's system prompt / tool set through shared state.
+      Thread.current[:agent_active_system] = system
+      Thread.current[:agent_active_tools]  = tools
       resp = post(messages)
 
       unless resp.is_a?(Hash)
-        events << { kind: :error, text: "unexpected response: #{resp.inspect}" }
-        return
+        events << { kind: :error, text: "unexpected response: #{resp.inspect}", depth: depth }
+        break
       end
 
       if resp["error"]
-        events << { kind: :error, text: resp.dig("error", "message") || resp.inspect }
-        return
+        events << { kind: :error, text: resp.dig("error", "message") || resp.inspect, depth: depth }
+        break
       end
 
       if (usage = Usage.from_openai(resp["usage"]))
@@ -83,12 +99,15 @@ class OpenaiProvider
       msg    = choice&.dig("message")
 
       unless msg
-        events << { kind: :error, text: "unexpected response: #{resp.inspect}" }
-        return
+        events << { kind: :error, text: "unexpected response: #{resp.inspect}", depth: depth }
+        break
       end
 
       content = msg["content"]
-      events << { kind: :assistant, text: content } if content && !content.strip.empty?
+      if content && !content.strip.empty?
+        final_text = content
+        events << { kind: :assistant, text: content, depth: depth }
+      end
 
       tool_calls = msg["tool_calls"]
       break unless tool_calls&.any?
@@ -97,30 +116,30 @@ class OpenaiProvider
       assistant_msg["tool_calls"] = tool_calls
       messages << assistant_msg
 
-      tool_calls.each do |tc|
-        fn   = tc["function"]
-        name = fn["name"]
-        args = JSON.parse(fn["arguments"]) rescue {}
-        events << { kind: :tool, text: "#{name} #{JSON.generate(args)}" }
-        summary, result, diff = Tools.call(name, args)
-        event = { kind: :tool_result, text: summary }
-        event[:diff] = diff if diff
-        events << event
-        messages << { "role" => "tool", "tool_call_id" => tc["id"], "content" => result.to_s }
+      calls = tool_calls.map do |tc|
+        fn = tc["function"] || {}
+        { id: tc["id"], name: fn["name"], input: (JSON.parse(fn["arguments"]) rescue {}) }
+      end
+      run_tool_batch(calls, events, depth).each do |r|
+        messages << { "role" => "tool", "tool_call_id" => r[:id], "content" => r[:result] }
       end
     end
-  ensure
-    events << { kind: :done }
+
+    final_text
   end
 
-  private
+  # System prompt / tool schemas for the current agent_run step. `post`
+  # overrides in subclasses read these so every provider shares role handling.
+  def active_system
+    Thread.current[:agent_active_system] || SYSTEM
+  end
 
-  def post(messages)
-    req = Net::HTTP::Post.new(@uri)
-    req["authorization"] = "Bearer #{@api_key}"
-    req["content-type"]  = "application/json"
+  def active_tools
+    Thread.current[:agent_active_tools] || Tools::DEFINITIONS
+  end
 
-    openai_tools = Tools::DEFINITIONS.map do |t|
+  def openai_tool_schemas
+    active_tools.map do |t|
       {
         type: "function",
         function: {
@@ -130,12 +149,20 @@ class OpenaiProvider
         }
       }
     end
+  end
+
+  private
+
+  def post(messages)
+    req = Net::HTTP::Post.new(@uri)
+    req["authorization"] = "Bearer #{@api_key}"
+    req["content-type"]  = "application/json"
 
     req.body = JSON.generate(
       model: @model,
       max_tokens: [MAX_TOKENS, MAX_OUT_TOKENS].min,
-      messages: [{ role: "system", content: SYSTEM }] + messages,
-      tools: openai_tools,
+      messages: [{ role: "system", content: active_system }] + messages,
+      tools: openai_tool_schemas,
       tool_choice: "auto"
     )
 

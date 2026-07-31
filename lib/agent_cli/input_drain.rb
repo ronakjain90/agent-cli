@@ -36,6 +36,17 @@ module AgentCli
           raw = read_raw_input(timeout_ms)
           return nil if raw.nil? || raw.empty?
 
+          raw = raw.dup.force_encoding(Encoding::BINARY)
+          # A bracketed paste can span multiple reads: the opening ESC[200~ arrives
+          # without its closing ESC[201~. Keep reading until the terminator lands so
+          # the paste isn't split mid-marker (which would leak "[200~" into the input).
+          while AgentCli::InputDrain.unclosed_paste?(raw)
+            more = read_raw_input(50)
+            break if more.nil? || more.empty?
+
+            raw << more.dup.force_encoding(Encoding::BINARY)
+          end
+
           @__agent_cli_event_q.concat(AgentCli::InputDrain.parse_all(raw))
           @__agent_cli_event_q.shift
         end
@@ -44,22 +55,39 @@ module AgentCli
       @patched = true
     end
 
+    # True when the buffer contains an opening bracketed-paste marker that has not yet
+    # been terminated, meaning we should read more input before parsing.
+    def unclosed_paste?(raw)
+      data = raw.to_s
+      open = data.rindex("\e[200~")
+      return false unless open
+
+      close = data.rindex("\e[201~")
+      close.nil? || close < open
+    end
+
     def parse_all(raw)
       data = raw.to_s.dup.force_encoding(Encoding::BINARY)
       events = []
       i = 0
 
       while i < data.bytesize
-        # Bracketed paste: ESC [ 200 ~ … ESC [ 201 ~
+        # Bracketed paste: ESC [ 200 ~ … ESC [ 201 ~. Treat everything up to the
+        # terminator (or end of buffer, if it never arrived) as literal pasted text.
         if data.byteslice(i, 6) == "\e[200~"
           close = data.index("\e[201~", i + 6)
-          if close
-            content = utf8(data.byteslice(i + 6, close - (i + 6)))
-            content = content.gsub(/\r\n?/, "\n")
-            events << rune_event(content) unless content.empty?
-            i = close + 6
-            next
-          end
+          endpos = close || data.bytesize
+          content = utf8(data.byteslice(i + 6, endpos - (i + 6)))
+          content = content.gsub(/\r\n?/, "\n")
+          events << rune_event(content) unless content.empty?
+          i = close ? close + 6 : data.bytesize
+          next
+        end
+
+        # A stray closing marker (its opener was consumed in an earlier read): skip it.
+        if data.byteslice(i, 6) == "\e[201~"
+          i += 6
+          next
         end
 
         b = data.getbyte(i)

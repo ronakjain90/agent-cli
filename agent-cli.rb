@@ -14,6 +14,15 @@
 #     * ollama     — local Ollama server (`ollama serve`)
 #     * opencode   — local OpenCode server (`opencode serve`)
 #
+#   Multi-agent: the top-level agent runs as a *manager* with a `delegate` tool
+#   that hands focused subtasks to fresh *worker* agents (see lib/agent_cli/agents.rb).
+#   Worker activity is shown indented in the chat log. Type /agents for details.
+#   (Works on anthropic / openai / openrouter / google / groq / ollama providers.)
+#
+#   Give workers a cheaper/faster model (or a different provider) with /worker, or:
+#     AGENT_WORKER_MODEL=claude-haiku-4-5 ruby agent-cli.rb
+#     AGENT_WORKER_PROVIDER=groq AGENT_WORKER_MODEL=llama-3.3-70b-versatile ruby agent-cli.rb
+#
 # Setup:
 #   gem install bubbletea lipgloss
 #
@@ -42,12 +51,13 @@
 #   AGENT_PROVIDER=opencode AGENT_MODEL=anthropic/claude-opus-4-8 ruby agent-cli.rb
 #
 # Shell execution (anthropic / openai / openrouter / google / groq / ollama) asks for permission
-# by default (y once · a session · n deny). Skip prompts with:
+# by default (y once · a session · p permanently · n deny). Read-only git commands
+# (git status/log/diff/…) are always allowed. Skip all prompts with:
 #   AGENT_ALLOW_SHELL=1 ruby agent-cli.rb
 #
 # Keys (chat):  type a request, Enter to send · /providers to switch · ctrl+c quit
 # Keys (picker): ↑/↓ move · enter select · esc back · ctrl+c quit
-# Keys (permission): y/enter allow once · a allow session · n/esc deny · ctrl+c quit
+# Keys (permission): y/enter allow once · a allow session · p allow permanently · n/esc deny · ctrl+c quit
 
 $LOAD_PATH.unshift File.expand_path("lib", __dir__)
 require "agent_cli"

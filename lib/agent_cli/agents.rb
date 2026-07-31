@@ -1,0 +1,209 @@
+# frozen_string_literal: true
+
+require_relative "tools"
+
+# Manager -> worker multi-agent orchestration.
+#
+# The top-level agent runs as a *manager*: it has the normal file/shell tools
+# plus a `delegate` tool that hands a focused, self-contained subtask to a fresh
+# *worker* agent. The worker runs its own tool-use loop (on the same provider)
+# and reports a summary back to the manager as the tool result. Workers may
+# delegate further, up to MAX_DEPTH, forming a manager -> worker tree.
+module Agents
+  # manager is depth 0; workers are depth >= 1. A worker may itself delegate
+  # only while its depth is below MAX_DEPTH, which bounds the recursion.
+  MAX_DEPTH = 2
+
+  # Cap on workers running at once within a single delegation batch, so a
+  # manager that fans out many subtasks doesn't open unbounded connections.
+  MAX_PARALLEL = 6
+
+  DELEGATE_TOOL_NAME = "delegate"
+
+  MANAGER_SYSTEM = <<~TXT
+    You are the manager agent — an orchestrator working in the user's current directory.
+    You have the normal file and shell tools, plus a `delegate` tool that hands a focused,
+    self-contained subtask to a fresh worker agent with its own tools.
+
+    How to work:
+    - For small or quick tasks, just use the tools yourself.
+    - For larger tasks, split the work into independent subtasks and `delegate` each one.
+      A worker does NOT see this conversation, so its brief must be complete on its own:
+      say exactly what to do, which files/paths are involved, and what to report back.
+    - Good things to delegate: scoped investigation ("find where X is handled and summarize it"),
+      and well-bounded edits ("update file Y to do Z").
+    - To run subtasks IN PARALLEL, emit multiple `delegate` calls in a single response — those
+      workers then execute concurrently. Only parallelize subtasks that are independent (e.g. do
+      not have two workers edit the same file at once).
+    - After workers report back, integrate their results, reconcile any conflicts, and give
+      the user one concise final answer.
+    - Keep prose brief; let the tools and workers do the work.
+  TXT
+
+  WORKER_SYSTEM = <<~TXT
+    You are a worker agent working in the user's current directory. You have been given ONE
+    focused subtask by your manager. Use the tools to inspect and modify files and run commands.
+    Prefer reading before writing.
+
+    Rules:
+    - Stay strictly within your assigned subtask — do not expand the scope.
+    - When finished, end with a short report: what you changed or found, the key file paths,
+      and anything the manager must know. That report is the ONLY thing the manager receives,
+      so make it self-contained.
+  TXT
+
+  DELEGATE_TOOL = {
+    name: DELEGATE_TOOL_NAME,
+    description:
+      "Hand a focused, self-contained subtask to a fresh worker agent that has its own " \
+      "file and shell tools. The worker cannot see this conversation, so include every " \
+      "detail it needs. Returns the worker's final report.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "Short label for the subtask (a few words), shown in the UI."
+        },
+        task: {
+          type: "string",
+          description:
+            "Complete, self-contained instructions for the worker: what to do, the " \
+            "relevant files/paths, and exactly what it should report back."
+        }
+      },
+      required: ["task"]
+    }
+  }.freeze
+
+  module_function
+
+  # Base tools every agent gets, plus `delegate` while below the depth cap.
+  def tools_for(depth)
+    tools = Tools::DEFINITIONS.dup
+    tools << DELEGATE_TOOL if depth < MAX_DEPTH
+    tools
+  end
+
+  def system_for(depth)
+    depth.zero? ? MANAGER_SYSTEM : WORKER_SYSTEM
+  end
+end
+
+# Mixed into providers that drive their own tool-use loop (Anthropic + OpenAI
+# family). Provides delegation: dispatching the `delegate` tool to a nested
+# worker agent. Each host provider must implement:
+#
+#   agent_run(messages, events, system:, tools:, depth:) -> final assistant text
+#
+module Delegation
+  # Optional dedicated provider instance (its own model, and possibly its own
+  # provider/API key) that runs worker agents. When nil, workers reuse the
+  # manager's provider/model.
+  attr_accessor :worker_provider
+
+  # Provider instance that should run worker turns.
+  def worker_runner
+    worker_provider || self
+  end
+
+  # Route a tool call: `delegate` spawns a worker; everything else is a normal
+  # tool. Returns [summary_for_ui, result_for_model] or a 3-tuple with a diff —
+  # the same shape as Tools.call.
+  def dispatch_tool(name, input, events, depth)
+    if name == Agents::DELEGATE_TOOL_NAME
+      run_worker(input || {}, events, depth)
+    else
+      Tools.call(name, input || {})
+    end
+  end
+
+  # Execute one assistant turn's tool calls and return per-call results in the
+  # original order as [{ id:, result: }, ...]. When a turn contains two or more
+  # `delegate` calls, those workers run concurrently (capped at MAX_PARALLEL);
+  # a single delegate or plain tools run inline, preserving prior behavior.
+  #
+  # `calls` is an ordered array of { id:, name:, input: }.
+  def run_tool_batch(calls, events, depth)
+    delegate_positions = (0...calls.length).select do |i|
+      calls[i][:name] == Agents::DELEGATE_TOOL_NAME
+    end
+
+    if delegate_positions.length < 2
+      # Sequential: announce each call, run it, emit its result inline.
+      return calls.map do |c|
+        events << { kind: :tool, text: "#{c[:name]} #{JSON.generate(c[:input])}", depth: depth }
+        emit_tool_result(events, c, dispatch_tool(c[:name], c[:input], events, depth), depth)
+      end
+    end
+
+    # Parallel fan-out. Announce every call up front so the UI shows all the
+    # delegations before their interleaved worker logs stream in.
+    calls.each do |c|
+      events << { kind: :tool, text: "#{c[:name]} #{JSON.generate(c[:input])}", depth: depth }
+    end
+
+    outcomes = Array.new(calls.length)
+
+    # Non-delegate tools run inline (they touch the filesystem/shell serially).
+    (0...calls.length).each do |i|
+      next if delegate_positions.include?(i)
+      outcomes[i] = Tools.call(calls[i][:name], calls[i][:input] || {})
+    end
+
+    # Delegates run concurrently, in capped slices.
+    delegate_positions.each_slice(Agents::MAX_PARALLEL) do |slice|
+      slice.map do |i|
+        Thread.new { outcomes[i] = run_worker(calls[i][:input] || {}, events, depth) }
+      end.each(&:join)
+    end
+
+    calls.each_index.map { |i| emit_tool_result(events, calls[i], outcomes[i], depth) }
+  end
+
+  private
+
+  def emit_tool_result(events, call, outcome, depth)
+    summary, result, diff = outcome
+    event = { kind: :tool_result, text: summary, depth: depth }
+    event[:diff] = diff if diff
+    events << event
+    { id: call[:id], result: result.to_s }
+  end
+
+  # Spawn a worker agent for one subtask and return its report to the manager.
+  def run_worker(input, events, depth)
+    child = depth + 1
+    task  = input["task"].to_s.strip
+    title = input["title"].to_s.strip
+    title = task.split("\n").first.to_s[0, 60] if title.empty?
+
+    if task.empty?
+      return ["delegate: missing task", "Error: delegate requires a 'task' description."]
+    end
+    if depth >= Agents::MAX_DEPTH
+      return ["delegate refused (depth #{depth})",
+              "Delegation depth limit reached — complete this subtask yourself."]
+    end
+
+    runner = worker_runner
+    events << { kind: :worker_start, text: title, depth: child }
+    messages = [{ "role" => "user", "content" => task }]
+    report =
+      begin
+        runner.agent_run(
+          messages, events,
+          system: Agents::WORKER_SYSTEM,
+          tools: Agents.tools_for(child),
+          depth: child
+        ).to_s.strip
+      rescue => e
+        events << { kind: :error, text: "worker failed: #{e.class}: #{e.message}", depth: child }
+        "Worker failed: #{e.class}: #{e.message}"
+      end
+    report = "(worker finished without a written summary)" if report.empty?
+    events << { kind: :worker_done, text: title, depth: child }
+
+    ["delegated → #{title}", report]
+  end
+end

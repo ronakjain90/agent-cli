@@ -72,22 +72,11 @@ class GroqProvider < OpenaiProvider
     req["Authorization"] = "Bearer #{key}"
     req["Content-Type"]  = "application/json"
 
-    openai_tools = Tools::DEFINITIONS.map do |t|
-      {
-        type: "function",
-        function: {
-          name: t[:name],
-          description: t[:description],
-          parameters: t[:input_schema]
-        }
-      }
-    end
-
     req.body = JSON.generate(
       model: @model,
       max_tokens: [MAX_TOKENS, MAX_OUT_TOKENS].min,
-      messages: [{ role: "system", content: SYSTEM }] + messages,
-      tools: openai_tools,
+      messages: [{ role: "system", content: active_system }] + messages,
+      tools: openai_tool_schemas,
       tool_choice: "auto"
     )
 

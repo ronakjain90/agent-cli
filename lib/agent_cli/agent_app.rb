@@ -37,7 +37,7 @@ class AgentApp
     @thinking = false
     @frame    = 0
     @events   = Queue.new
-    @worker   = nil
+    @worker_thread = nil
     @height   = 24
     @width    = 80
     @diffs       = []
@@ -55,6 +55,7 @@ class AgentApp
     @api_key_input = ""
     @api_key_error = nil
     @picker_from_chat = false
+    @picker_target = :manager
     @pending_model_id = nil
     @suggest_cursor = 0
     @history = PromptHistory.load
@@ -70,6 +71,7 @@ class AgentApp
     @bot    = Lipgloss::Style.new
     @tool   = Lipgloss::Style.new.foreground("#2DA44E")
     @toolok = Lipgloss::Style.new.foreground("#656D76")
+    @worker = Lipgloss::Style.new.foreground("#D29922").bold(true)
     @err    = Lipgloss::Style.new.foreground("#CF222E").bold(true)
     @warn   = Lipgloss::Style.new.foreground("#9A6700").bold(true)
     @prompt = Lipgloss::Style.new.foreground("#FAFAFA").background("#7D56F4").padding(0, 1)
@@ -174,6 +176,7 @@ class AgentApp
   end
 
   def open_providers_picker
+    @picker_target = :manager
     @picker_from_chat = true
     @input = ""
     @cursor_pos = 0
@@ -190,6 +193,26 @@ class AgentApp
     end
   end
 
+  # Choose which provider/model worker (sub-)agents should use.
+  def open_worker_picker
+    unless @provider
+      @log << { kind: :error, text: "connect a provider first — type /providers" }
+      return [self, nil]
+    end
+
+    @picker_target = :worker
+    @picker_from_chat = true
+    @input = ""
+    @cursor_pos = 0
+    @suggest_cursor = 0
+    @mode = :pick_provider
+    @menu_cursor = provider_menu_index(current_worker_provider_id)
+    @menu_scroll = 0
+    @picker_error = nil
+    @selected_provider = nil
+    [self, nil]
+  end
+
   def show_command_help
     @log << { kind: :assistant, text: "Available commands:" }
     Commands::ALL.each do |cmd|
@@ -198,10 +221,43 @@ class AgentApp
     [self, nil]
   end
 
+  def show_agents_help
+    @log << { kind: :assistant, text: "Manager → worker multi-agent flow:" }
+    [
+      "Your requests go to a manager agent with the usual file/shell tools plus a",
+      "`delegate` tool. For larger jobs it splits the work into focused subtasks and",
+      "hands each to a fresh worker agent that runs its own tool loop and reports back.",
+      "Independent subtasks delegated in one turn run in parallel (up to #{Agents::MAX_PARALLEL} at once).",
+      "Worker activity shows up indented below (⌁ worker …). Workers can nest up to",
+      "#{Agents::MAX_DEPTH} level#{Agents::MAX_DEPTH == 1 ? "" : "s"} deep. Works on the anthropic / openai / openrouter / google / groq / ollama",
+      "providers (opencode runs its own server-side agent).",
+      "",
+      "Type /worker to give workers a different (e.g. cheaper/faster) model — even a",
+      "different provider. Or set AGENT_WORKER_PROVIDER / AGENT_WORKER_MODEL env vars.",
+      "Current workers: #{worker_summary || "same as manager (#{@provider&.model_label || "none"})"}"
+    ].each { |line| @log << { kind: :tool_result, text: line } }
+    [self, nil]
+  end
+
   private
 
   def ready_message
-    { kind: :assistant, text: "Coding agent ready — provider: #{@provider.label} · model: #{@provider.model_label}" }
+    text = "Coding agent ready — provider: #{@provider.label} · model: #{@provider.model_label}"
+    if (w = worker_summary)
+      text += " · workers: #{w}"
+    end
+    { kind: :assistant, text: text }
+  end
+
+  # Short description of the worker model, or nil when workers reuse the manager.
+  def worker_summary
+    return nil unless @provider.respond_to?(:worker_provider)
+
+    worker = @provider.worker_provider
+    return nil unless worker
+
+    same_provider = worker.label == @provider.label
+    same_provider ? worker.model_label.to_s : "#{worker.model_label} (#{worker.label})"
   end
 
   def update_permission(message)
@@ -211,6 +267,8 @@ class AgentApp
         :allow
       elsif key == "a" || key == "A"
         :always
+      elsif key == "p" || key == "P"
+        :persist
       elsif key == "n" || key == "N" || message.esc?
         :deny
       end
@@ -231,6 +289,8 @@ class AgentApp
       @log << { kind: :tool_result, text: "  allowed once" }
     when :always
       @log << { kind: :tool_result, text: "  allowed for this session" }
+    when :persist
+      @log << { kind: :tool_result, text: "  allowed permanently" }
     when :deny
       @log << { kind: :tool_result, text: "  denied" }
     end
@@ -443,8 +503,12 @@ class AgentApp
   end
 
   def activate_provider(model_id)
+    return activate_worker(model_id) if @picker_target == :worker
+
     @provider = @selected_provider.build(model_id)
     Preferences.save(@selected_provider.id, model_id)
+    # Re-attach the saved worker provider to the freshly built manager.
+    Provider.attach_worker(@provider, @selected_provider.id)
     was_chat = @picker_from_chat
     @mode = :chat
     @picker_from_chat = false
@@ -475,6 +539,55 @@ class AgentApp
     else
       reset_to_provider_picker
     end
+  end
+
+  # Attach (or clear) the provider/model that worker agents use. Does not reset
+  # the current conversation — only the manager provider owns the chat.
+  def activate_worker(model_id)
+    worker = @selected_provider.build(model_id)
+    unless worker.respond_to?(:agent_run)
+      @picker_error = "#{@selected_provider.label} can't run worker agents — pick another"
+      @mode = :pick_model
+      return [self, nil]
+    end
+
+    if @provider.respond_to?(:worker_provider=) &&
+       worker.label == @provider.label && worker.model_label == @provider.model_label
+      # Same as the manager → treat as "reset to manager model".
+      @provider.worker_provider = nil
+      Preferences.clear_worker
+      note = "Workers will use the manager model (#{@provider.model_label})."
+    else
+      @provider.worker_provider = worker if @provider.respond_to?(:worker_provider=)
+      Preferences.save_worker(@selected_provider.id, model_id)
+      note = "Workers will use #{worker.label} · #{worker.model_label}."
+    end
+
+    @mode = :chat
+    @picker_target = :manager
+    @picker_from_chat = false
+    @pending_model_id = nil
+    @api_key_input = ""
+    @api_key_error = nil
+    @picker_error = nil
+    @log << { kind: :assistant, text: note }
+    [self, nil]
+  rescue Settings::MissingApiKeyError => e
+    @pending_model_id = model_id
+    @mode = :enter_api_key
+    @api_key_input = ""
+    @api_key_error = nil
+    @picker_error = nil
+    [self, nil]
+  rescue => e
+    @picker_error = e.message
+    @mode = :pick_model
+    [self, nil]
+  end
+
+  def current_worker_provider_id
+    prefs = Preferences.load
+    prefs && (prefs[:worker_provider] || prefs[:provider])
   end
 
   def update_api_key_entry(message)
@@ -630,6 +743,7 @@ class AgentApp
   def cancel_picker_to_chat
     @mode = :chat
     @picker_from_chat = false
+    @picker_target = :manager
     @selected_provider = nil
     @model_items = []
     @menu_cursor = 0
@@ -769,7 +883,7 @@ class AgentApp
     detail = req[:detail].to_s
     tool = req[:tool].to_s
     status = @warn.render("allow #{tool}? #{detail}")
-    footer = @hint.render("y/enter allow once · a allow session · n/esc deny · ctrl+c quit")
+    footer = @hint.render("y/enter allow once · a allow session · p allow permanently · n/esc deny · ctrl+c quit")
     usage = usage_line
 
     content = lines + ["", status]
@@ -827,7 +941,8 @@ class AgentApp
     if @provider
       model = @composer_fg.render(@provider.model_label.to_s)
       provider = @composer_dim.render(" #{@provider.label}")
-      "#{mode}#{sep}#{model}#{provider}"
+      worker = (w = worker_summary) ? @composer_dim.render("  ⌁ #{w}") : ""
+      "#{mode}#{sep}#{model}#{provider}#{worker}"
     else
       "#{mode}#{sep}#{@composer_dim.render("no model — /providers")}"
     end
@@ -976,9 +1091,16 @@ class AgentApp
   end
 
   def picker_title
+    worker = @picker_target == :worker
     case @mode
-    when :pick_provider then "Select provider:"
-    when :pick_model then @selected_provider&.model_picker_title || "Select model:"
+    when :pick_provider
+      worker ? "Select worker provider:" : "Select provider:"
+    when :pick_model
+      if worker
+        "Select worker model#{@selected_provider ? " (#{@selected_provider.label})" : ""}:"
+      else
+        @selected_provider&.model_picker_title || "Select model:"
+      end
     else ""
     end
   end
@@ -1100,7 +1222,7 @@ class AgentApp
     @diffs = []
     @diff_cursor = -1
 
-    @worker = Thread.new(@messages, @events) do |msgs, events|
+    @worker_thread = Thread.new(@messages, @events) do |msgs, events|
       @provider.run_turn(msgs, events)
     end
 
@@ -1144,15 +1266,22 @@ class AgentApp
     # blank + composer (3) + status bar
     bottom = 5
 
-    rendered = @log.map do |e|
-      case e[:kind]
-      when :user        then "#{@you.render("you")} #{e[:text]}"
-      when :assistant   then @bot.render(e[:text])
-      when :tool        then @tool.render("→ #{e[:text]}")
-      when :tool_result then @toolok.render("  #{e[:text]}")
-      when :error       then @err.render("! #{e[:text]}")
-      end
-    end.flat_map { |s| s.to_s.split("\n") }
+    rendered = @log.flat_map do |e|
+      styled =
+        case e[:kind]
+        when :user         then "#{@you.render("you")} #{e[:text]}"
+        when :assistant    then @bot.render(e[:text].to_s)
+        when :tool         then @tool.render("→ #{e[:text]}")
+        when :tool_result  then @toolok.render("  #{e[:text]}")
+        when :error        then @err.render("! #{e[:text]}")
+        when :worker_start then @worker.render("⌁ worker: #{e[:text]}")
+        when :worker_done  then @worker.render("✓ worker done: #{e[:text]}")
+        end
+      next [] unless styled
+
+      indent = "  " * e[:depth].to_i
+      styled.to_s.split("\n").map { |line| indent.empty? ? line : "#{indent}#{line}" }
+    end
 
     budget = [@height - bottom - extra, 5].max
     rendered.last(budget)

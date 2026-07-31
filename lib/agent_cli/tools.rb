@@ -1,9 +1,30 @@
 # frozen_string_literal: true
 
 require_relative "diff"
+require_relative "preferences"
 
 # Capabilities exposed to the model (anthropic / openai / openrouter / google / groq / ollama providers).
 module Tools
+  # Serializes user permission prompts so concurrent workers ask one at a time
+  # (the TUI can only hold one pending permission request).
+  APPROVAL_MUTEX = Mutex.new
+
+  # Read-only command prefixes that are always allowed without prompting.
+  # Users can extend this at runtime via the permission prompt (persisted in Preferences).
+  DEFAULT_ALLOWED = [
+    "git status", "git log", "git diff", "git show", "git branch",
+    "git remote", "git rev-parse", "git describe", "git blame",
+    "git ls-files", "git shortlog", "git tag", "git stash list",
+    "git config --get", "git config --list"
+  ].freeze
+
+  # Tools whose first argument is a subcommand, so a persisted prefix keeps two words
+  # (e.g. "git status" rather than just "git").
+  SUBCOMMAND_TOOLS = %w[git gh npm yarn pnpm bundle cargo go docker kubectl].freeze
+
+  # Reject anything that could chain, redirect, or substitute another command;
+  # such lines always require explicit approval even if they start with an allowed prefix.
+  SHELL_METACHARS = /[;&|`><\n]|\$\(/.freeze
   DEFINITIONS = [
     {
       name: "read_file",
@@ -63,6 +84,29 @@ module Tools
       ENV["AGENT_ALLOW_SHELL"] == "1" || session_shell?
     end
 
+    # True when a command matches a built-in or user-persisted allowlist prefix and
+    # contains no shell metacharacters that could smuggle in a second command.
+    def auto_allowed?(cmd)
+      norm = cmd.to_s.strip
+      return false if norm.empty? || norm.match?(SHELL_METACHARS)
+
+      allowlist.any? { |prefix| norm == prefix || norm.start_with?("#{prefix} ") }
+    end
+
+    def allowlist
+      DEFAULT_ALLOWED + Preferences.allowed_commands
+    end
+
+    # The prefix to persist when the user permanently allows a command: the first token,
+    # or the first two tokens for subcommand-style tools like git/npm/docker.
+    def persist_prefix(cmd)
+      tokens = cmd.to_s.strip.split(/\s+/)
+      return cmd.to_s.strip if tokens.empty?
+
+      count = SUBCOMMAND_TOOLS.include?(tokens[0]) ? 2 : 1
+      tokens.first(count).join(" ")
+    end
+
     # Returns [summary_for_ui, result_string_for_model] or a 3-tuple with a diff.
     def call(name, input)
       case name
@@ -99,10 +143,12 @@ module Tools
     private
 
     def run_command(cmd)
-      unless shell_permitted?
+      unless shell_permitted? || auto_allowed?(cmd)
         case request_permission("run_command", cmd)
         when :always
           allow_shell_session!
+        when :persist
+          Preferences.add_allowed_command(persist_prefix(cmd))
         when :allow
           # one-shot
         else
@@ -117,7 +163,8 @@ module Tools
     def request_permission(tool, detail)
       return :deny unless approver
 
-      approver.call(tool, detail)
+      # One outstanding prompt at a time, even with parallel workers.
+      APPROVAL_MUTEX.synchronize { approver.call(tool, detail) }
     end
   end
 end

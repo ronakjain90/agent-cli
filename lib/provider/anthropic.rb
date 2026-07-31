@@ -6,6 +6,7 @@ require "uri"
 
 require_relative "../agent_cli/constants"
 require_relative "../agent_cli/tools"
+require_relative "../agent_cli/agents"
 require_relative "../agent_cli/usage"
 require_relative "base"
 
@@ -37,11 +38,7 @@ end
 
 # Anthropic Messages API tool-use loop.
 class AnthropicProvider
-  SYSTEM = <<~TXT
-    You are a coding agent working in the user's current directory.
-    Use the provided tools to inspect and modify files and to run commands.
-    Prefer reading before writing. Keep prose brief; let the tools do the work.
-  TXT
+  include Delegation
 
   attr_reader :model
 
@@ -59,13 +56,24 @@ class AnthropicProvider
     @model
   end
 
+  # Top-level user turn: run the manager agent, then signal completion.
   def run_turn(messages, events)
+    agent_run(messages, events, system: Agents.system_for(0), tools: Agents.tools_for(0), depth: 0)
+  ensure
+    events << { kind: :done }
+  end
+
+  # One agent (manager at depth 0, worker at depth >= 1). Returns the final
+  # assistant text so a manager can read a worker's report.
+  def agent_run(messages, events, system:, tools:, depth:)
+    final_text = nil
+
     MAX_STEPS.times do
-      resp = post(messages)
+      resp = post(messages, system, tools)
 
       if resp["type"] == "error"
-        events << { kind: :error, text: resp.dig("error", "message") || resp.inspect }
-        return
+        events << { kind: :error, text: resp.dig("error", "message") || resp.inspect, depth: depth }
+        break
       end
 
       if (usage = Usage.from_anthropic(resp["usage"]))
@@ -75,8 +83,11 @@ class AnthropicProvider
       tool_uses = []
       Array(resp["content"]).each do |block|
         case block["type"]
-        when "text"     then events << { kind: :assistant, text: block["text"] }
-        when "tool_use" then tool_uses << block
+        when "text"
+          final_text = block["text"]
+          events << { kind: :assistant, text: block["text"], depth: depth }
+        when "tool_use"
+          tool_uses << block
         end
       end
 
@@ -84,24 +95,20 @@ class AnthropicProvider
 
       break if resp["stop_reason"] != "tool_use"
 
-      results = tool_uses.map do |tu|
-        events << { kind: :tool, text: "#{tu["name"]} #{JSON.generate(tu["input"])}" }
-        summary, result, diff = Tools.call(tu["name"], tu["input"] || {})
-        event = { kind: :tool_result, text: summary }
-        event[:diff] = diff if diff
-        events << event
-        { "type" => "tool_result", "tool_use_id" => tu["id"], "content" => result.to_s }
+      calls = tool_uses.map { |tu| { id: tu["id"], name: tu["name"], input: tu["input"] } }
+      results = run_tool_batch(calls, events, depth).map do |r|
+        { "type" => "tool_result", "tool_use_id" => r[:id], "content" => r[:result] }
       end
 
       messages << { "role" => "user", "content" => results }
     end
-  ensure
-    events << { kind: :done }
+
+    final_text
   end
 
   private
 
-  def post(messages)
+  def post(messages, system, tools)
     req = Net::HTTP::Post.new(@uri)
     req["x-api-key"]         = @api_key
     req["anthropic-version"] = "2023-06-01"
@@ -109,8 +116,8 @@ class AnthropicProvider
     req.body = JSON.generate(
       model: @model,
       max_tokens: MAX_TOKENS,
-      system: SYSTEM,
-      tools: Tools::DEFINITIONS,
+      system: system,
+      tools: tools,
       messages: messages
     )
 
