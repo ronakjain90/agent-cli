@@ -103,7 +103,7 @@ class AnthropicProvider
       end
 
       messages << { "role" => "user", "content" => results }
-      messages = Agents.compact_messages(messages)
+      messages = Agents.trim_messages(messages)
     end
 
     final_text

@@ -131,7 +131,7 @@ class OpenaiProvider
       run_tool_batch(calls, events, depth).each do |r|
         messages << { "role" => "tool", "tool_call_id" => r[:id], "content" => r[:result] }
       end
-      messages = Agents.compact_messages(messages)
+      messages = Agents.trim_messages(messages)
     end
 
     final_text

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "json"
+
 require_relative "tools"
 
 # Manager -> worker multi-agent orchestration.
@@ -114,6 +116,13 @@ module Agents
 
   COMPACTED_PLACEHOLDER = "[earlier tool result omitted — re-run the tool for full output]"
 
+  SUPERSEDED_PLACEHOLDER = "[superseded — the same call was made again later; see the newer result]"
+
+  # Snapshots of on-disk state, where a later call supersedes an earlier one.
+  # Excludes run_command / run_tests: a run before a fix and one after it are
+  # both meaningful.
+  IDEMPOTENT_READ_TOOLS = %w[read_file list_files].freeze
+
   def estimate_tokens(messages)
     messages.sum { |msg| message_chars(msg) } / CHARS_PER_TOKEN
   end
@@ -147,6 +156,92 @@ module Agents
 
       part.merge("content" => COMPACTED_PLACEHOLDER)
     end)
+  end
+
+  # Normalized so the same call still matches when the model spelled its
+  # arguments differently the second time.
+  def call_signature(name, args)
+    parsed = args.is_a?(String) ? JSON.parse(args) : args
+    parsed = parsed.sort.to_h if parsed.is_a?(Hash)
+    "#{name}:#{JSON.generate(parsed)}"
+  rescue JSON::ParserError, JSON::GeneratorError
+    "#{name}:#{args}"
+  end
+
+  # tool_call_id => signature, for idempotent read tools only.
+  def read_call_signatures(messages)
+    messages.each_with_object({}) do |msg, sigs|
+      next unless msg["role"] == "assistant"
+
+      Array(msg["tool_calls"]).each do |tc|
+        fn = tc["function"] || {}
+        next unless IDEMPOTENT_READ_TOOLS.include?(fn["name"])
+
+        sigs[tc["id"]] = call_signature(fn["name"], fn["arguments"])
+      end
+
+      next unless msg["content"].is_a?(Array)
+
+      msg["content"].each do |block|
+        next unless block.is_a?(Hash) && block["type"] == "tool_use"
+        next unless IDEMPOTENT_READ_TOOLS.include?(block["name"])
+
+        sigs[block["id"]] = call_signature(block["name"], block["input"])
+      end
+    end
+  end
+
+  # Every trimming pass a provider should run between tool-use steps. Returns
+  # the same array it was given — the live conversation the UI reads.
+  def trim_messages(messages)
+    compact_messages(dedupe_stale_results(messages))
+  end
+
+  # Keeps only the newest result per repeated read — the earlier ones describe
+  # state that no longer holds. Runs every step, unlike compact_messages, which
+  # waits for the budget.
+  def dedupe_stale_results(messages)
+    sigs = read_call_signatures(messages)
+    return messages if sigs.empty?
+
+    # Newest-first, so the first sighting of a signature is the copy we keep.
+    seen = {}
+    messages.each_index.reverse_each do |i|
+      next unless tool_result?(messages[i])
+
+      messages[i] = superseded_message(messages[i], sigs, seen)
+    end
+
+    messages
+  end
+
+  def superseded_message(msg, sigs, seen)
+    if msg["role"] == "tool"
+      sig = sigs[msg["tool_call_id"]]
+      return msg unless sig
+      return msg.merge("content" => SUPERSEDED_PLACEHOLDER) if seen[sig]
+
+      seen[sig] = true
+      return msg
+    end
+
+    changed = false
+    parts = msg["content"].map do |part|
+      next part unless part.is_a?(Hash) && part["type"] == "tool_result"
+
+      sig = sigs[part["tool_use_id"]]
+      next part unless sig
+
+      if seen[sig]
+        changed = true
+        part.merge("content" => SUPERSEDED_PLACEHOLDER)
+      else
+        seen[sig] = true
+        part
+      end
+    end
+
+    changed ? msg.merge("content" => parts) : msg
   end
 
   # Trims oldest tool results in place — the caller's array is the live
