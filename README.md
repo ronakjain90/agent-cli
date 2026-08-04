@@ -135,6 +135,27 @@ AGENT_PROVIDER=opencode AGENT_MODEL=anthropic/claude-opus-4-8 ruby agent-cli.rb
 
 ---
 
+## Install as a gem (run it in any project)
+
+Package agent-cli as a gem and install its `agent-cli` executable onto your
+PATH, then run it from inside any project. The agent always operates on the
+**current working directory**, so no per-project setup is needed. Global state
+(API keys, model choice) lives in `~/.agent-cli/` and `~/.config/agent-cli/`.
+
+**Build and install from this repo:**
+
+```bash
+gem build agent_cli.gemspec          # → agent_cli-<version>.gem
+gem install ./agent_cli-*.gem        # installs the `agent-cli` command + deps
+```
+
+**Run it in another project:**
+
+```bash
+cd ~/code/some-other-project
+agent-cli                            # same TUI, scoped to this directory
+```
+
 ## Tools the model can call
 
 | Tool | Purpose |

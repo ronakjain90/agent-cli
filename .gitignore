@@ -1,1 +1,6 @@
 .idea
+
+# Gem packaging
+*.gem
+/Gemfile.lock
+/pkg/

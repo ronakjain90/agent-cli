@@ -71,14 +71,15 @@ module Usage
   end
 
   def format(totals)
+    return nil if totals.nil? || totals[:input].zero?
     return nil unless any?(totals)
 
     parts = [
       "in #{commas(totals[:input])}",
       "out #{commas(totals[:output])}"
     ]
-    parts << "cache read #{commas(totals[:cache_read])}" if totals[:cache_read].to_i > 0
-    parts << "cache write #{commas(totals[:cache_write])}" if totals[:cache_write].to_i > 0
+    parts << "cache read #{commas(totals[:cache_read])}" if totals[:cache_read].to_i.positive?
+    parts << "cache write #{commas(totals[:cache_write])}" if totals[:cache_write].to_i.positive?
     parts.join(" · ")
   end
 

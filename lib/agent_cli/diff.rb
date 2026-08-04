@@ -3,7 +3,6 @@
 require_relative "constants"
 
 # Minimal unified-diff generator for write_file changes.
-# test diff
 module Diff
   module_function
 

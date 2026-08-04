@@ -61,13 +61,5 @@
 
 $LOAD_PATH.unshift File.expand_path("lib", __dir__)
 require "agent_cli"
-require "bubbletea"
 
-AgentCli::InputDrain.patch!
-
-runtime_provider, startup_error = Provider.resolve_startup
-Bubbletea.run(
-  AgentApp.new(runtime_provider, startup_error: startup_error),
-  alt_screen: true,
-  bracketed_paste: true
-)
+AgentCli.start
