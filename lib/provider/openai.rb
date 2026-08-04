@@ -73,8 +73,10 @@ class OpenaiProvider
   # active system/tools set here (subclasses keep a single-arg `post`).
   def agent_run(messages, events, system:, tools:, depth:)
     final_text = nil
+    steps_left = MAX_STEPS
 
-    MAX_STEPS.times do
+    while steps_left.positive?
+      steps_left -= 1
       # Thread-local so parallel workers (possibly at different depths) don't
       # clobber each other's system prompt / tool set through shared state.
       Thread.current[:agent_active_system] = system
@@ -111,6 +113,13 @@ class OpenaiProvider
 
       tool_calls = msg["tool_calls"]
       break unless tool_calls&.any?
+
+      # Recording these calls would leave them unanswered, which the API rejects
+      # on every later request too.
+      if steps_left.zero?
+        events << Agents.step_limit_event(depth)
+        break
+      end
 
       assistant_msg = { "role" => "assistant", "content" => content }
       assistant_msg["tool_calls"] = tool_calls

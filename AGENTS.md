@@ -117,6 +117,6 @@ This repo *is itself* a coding agent — treat changes through the lens of how a
 - The `delegate` tool (and the multi-agent caps `MAX_DEPTH = 2`, `MAX_PARALLEL = 6`) are exposed by the `Delegation` module in `lib/agent_cli/agents.rb`, which `AnthropicProvider` and `OpenaiProvider` mix in; `OpencodeProvider` does not — do not raise unbounded fan-out without lowering `MAX_PARALLEL`.
 - The `opencode` provider **owns its own edit tools** — it does *not* use `Tools.call`; it reads diffs from the server via `/session/:id/diff` and reports them as `:diff` events for the panel.
 - Provider `build(model_id)` may raise `Settings::MissingApiKeyError` — the TUI routes this to the in-TUI key entry; preserve that contract.
-- `MAX_STEPS = 25` is the safety cap on the tool-loop per turn; long agentic tasks should rely on the manager/worker split, not a single turn.
+- `MAX_STEPS = 25` is the safety cap on the tool-loop per turn; long agentic tasks should rely on the manager/worker split, not a single turn. Hitting the cap emits `Agents.step_limit_event` — never end a turn silently, and never record a tool call the loop won't answer (an unanswered `tool_calls`/`tool_use` block 400s the *next* request too).
 - `Usage` meters assume 4 chars/token for rough context-fill estimation when the provider doesn't report usage (important for Ollama/opencode).
 - `.ruby-lsp/` and `.idea/` are git-ignored dev artifacts; don't touch `.claude/settings.local.json` (local sandbox perms, not committed).

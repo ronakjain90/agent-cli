@@ -114,6 +114,16 @@ module Agents
     [MANAGER_SYSTEM, agents_context].compact.join("\n")
   end
 
+  def step_limit_event(depth)
+    who = depth.zero? ? "turn" : "worker"
+    {
+      kind: :error,
+      depth: depth,
+      text: "step limit reached — this #{who} used all #{MAX_STEPS} tool-loop steps and stopped " \
+            "before answering. Send a follow-up (e.g. \"continue\") to keep going."
+    }
+  end
+
   COMPACTED_PLACEHOLDER = "[earlier tool result omitted — re-run the tool for full output]"
 
   SUPERSEDED_PLACEHOLDER = "[superseded — the same call was made again later; see the newer result]"

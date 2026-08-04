@@ -69,8 +69,10 @@ class AnthropicProvider
   # assistant text so a manager can read a worker's report.
   def agent_run(messages, events, system:, tools:, depth:)
     final_text = nil
+    steps_left = MAX_STEPS
 
-    MAX_STEPS.times do
+    while steps_left.positive?
+      steps_left -= 1
       resp = post(messages, system, tools)
 
       if resp["type"] == "error"
@@ -91,6 +93,15 @@ class AnthropicProvider
         when "tool_use"
           tool_uses << block
         end
+      end
+
+      # Keep the text, drop the tool_use blocks: recording them without matching
+      # tool_results is rejected on every later request too.
+      if resp["stop_reason"] == "tool_use" && steps_left.zero?
+        text_only = Array(resp["content"]).reject { |block| block["type"] == "tool_use" }
+        messages << { "role" => "assistant", "content" => text_only } if text_only.any?
+        events << Agents.step_limit_event(depth)
+        break
       end
 
       messages << { "role" => "assistant", "content" => resp["content"] }

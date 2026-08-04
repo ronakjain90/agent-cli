@@ -250,7 +250,8 @@ lib/provider/           # Provider::Base + anthropic / openai / openrouter /
 ```
 
 **Flow:** the TUI runs the provider's turn on a worker thread; the provider
-drives a tool-use loop (capped at `MAX_STEPS = 25` iterations per turn) that
+drives a tool-use loop (capped at `MAX_STEPS = 25` iterations per turn; a turn
+that hits the cap says so instead of going quiet) that
 calls the model, dispatches tool calls through `Tools.call` (or `delegate` →
 `run_worker`), and emits events — assistant text, tool results, usage, diffs —
 back through a `Queue`. The TUI drains those events on each poll tick and
