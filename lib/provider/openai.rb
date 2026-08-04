@@ -30,7 +30,7 @@ class Provider
     end
 
     def build(model_id)
-      OpenaiProvider.new(api_key: Settings.require_api_key(api_key_env), model: model_id)
+      OpenaiProvider.new(api_key: Settings.require_api_key(api_key_env), model: model_id, debug: HTTP.debug_enabled)
     end
   end
 end
@@ -42,12 +42,15 @@ class OpenaiProvider
   # Default system prompt when no agent role is active (kept for compatibility).
   SYSTEM = Agents::MANAGER_SYSTEM
 
-  attr_reader :model
+  DEFAULT_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 
-  def initialize(api_key:, model:)
+  attr_reader :model, :uri
+
+  def initialize(api_key:, model:, debug: false)
     @api_key = api_key
     @model   = model
-    @uri     = URI("https://api.openai.com/v1/chat/completions")
+    @uri     = URI(DEFAULT_ENDPOINT)
+    @log_handle = HTTP.open_log if debug
   end
 
   def label
@@ -62,6 +65,7 @@ class OpenaiProvider
   def run_turn(messages, events)
     agent_run(messages, events, system: Agents.system_for(0), tools: Agents.tools_for(0), depth: 0)
   ensure
+    @log_handle&.close
     events << { kind: :done }
   end
 
@@ -159,21 +163,20 @@ class OpenaiProvider
   private
 
   def post(messages)
-    req = Net::HTTP::Post.new(@uri)
-    req["authorization"] = "Bearer #{@api_key}"
-    req["content-type"]  = "application/json"
-
-    req.body = JSON.generate(
+    body = JSON.generate(
       model: @model,
       max_tokens: [MAX_TOKENS, MAX_OUT_TOKENS].min,
       messages: [{ role: "system", content: active_system }] + messages,
       tools: openai_tool_schemas,
       tool_choice: "auto"
     )
+    headers = {
+      "authorization" => "Bearer #{@api_key}",
+      "content-type"  => "application/json"
+    }
 
-    res = Net::HTTP.start(@uri.host, @uri.port, use_ssl: true, read_timeout: 120) do |http|
-      http.request(req)
-    end
+    res = HTTP.request(@uri, body: body, headers: headers, read_timeout: 120,
+                            log_label: "OpenAI POST", log_handle: @log_handle)
     parse_response(res.body)
   rescue => e
     { "error" => { "message" => "#{e.class}: #{e.message}" } }
@@ -196,4 +199,3 @@ class OpenaiProvider
     { "error" => { "message" => "#{e.class}: #{e.message}" } }
   end
 end
-

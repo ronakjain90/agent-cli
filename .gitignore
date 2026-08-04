@@ -4,3 +4,6 @@
 *.gem
 /Gemfile.lock
 /pkg/
+
+# Debug log files
+/log/

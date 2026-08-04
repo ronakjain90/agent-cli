@@ -55,14 +55,21 @@
 # (git status/log/diff/…) are always allowed. Skip all prompts with:
 #   ruby agent-cli.rb --yolo
 #
+# Debug mode logs every provider API request/response to log/agent-cli-<timestamp>.log:
+#   ruby agent-cli.rb --debug
+#
 # Keys (chat):  type a request, Enter to send · /providers to switch · ctrl+c quit
 # Keys (picker): ↑/↓ move · enter select · esc back · ctrl+c quit
 # Keys (permission): y/enter allow once · a allow session · p allow permanently · n/esc deny · esc back · ctrl+c quit
 
-# Parse --yolo flag before loading anything else: in yolo mode the agent skips
-# all permission prompts for shell commands.
+# Parse flags before loading anything else.
+#   --yolo  : skip all permission prompts for shell commands
+#   --debug : log all provider API requests/responses to log/agent-cli-<timestamp>.log
 if ARGV.delete("--yolo")
   ENV["AGENT_ALLOW_SHELL"] = "1"
+end
+if ARGV.delete("--debug")
+  ENV["AGENT_DEBUG"] = "1"
 end
 
 $LOAD_PATH.unshift File.expand_path("lib", __dir__)

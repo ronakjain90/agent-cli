@@ -31,7 +31,8 @@ class Provider
     end
 
     def build(model_id)
-      AnthropicProvider.new(api_key: Settings.require_api_key(api_key_env), model: model_id)
+      api_key = Settings.require_api_key(api_key_env)
+      AnthropicProvider.new(api_key: api_key, model: model_id, debug: HTTP.debug_enabled)
     end
   end
 end
@@ -42,10 +43,11 @@ class AnthropicProvider
 
   attr_reader :model
 
-  def initialize(api_key:, model:)
+  def initialize(api_key:, model:, debug: false)
     @api_key = api_key
     @model   = model
     @uri     = URI("https://api.anthropic.com/v1/messages")
+    @log_handle = HTTP.open_log if debug
   end
 
   def label
@@ -60,6 +62,7 @@ class AnthropicProvider
   def run_turn(messages, events)
     agent_run(messages, events, system: Agents.system_for(0), tools: Agents.tools_for(0), depth: 0)
   ensure
+    @log_handle&.close
     events << { kind: :done }
   end
 
@@ -109,21 +112,23 @@ class AnthropicProvider
   private
 
   def post(messages, system, tools)
-    req = Net::HTTP::Post.new(@uri)
-    req["x-api-key"]         = @api_key
-    req["anthropic-version"] = "2023-06-01"
-    req["content-type"]      = "application/json"
-    req.body = JSON.generate(
+    body = JSON.generate(
       model: @model,
       max_tokens: MAX_TOKENS,
       system: system,
       tools: tools,
-      messages: messages
+      messages: messages,
+      context_management: CONTEXT_MANAGEMENT
     )
+    headers = {
+      "x-api-key" => @api_key,
+      "anthropic-version" => "2023-06-01",
+      "anthropic-beta" => CONTEXT_MANAGEMENT_BETA,
+      "content-type" => "application/json"
+    }
 
-    res = Net::HTTP.start(@uri.host, @uri.port, use_ssl: true, read_timeout: 120) do |http|
-      http.request(req)
-    end
+    res = HTTP.request(@uri, body: body, headers: headers, read_timeout: 120,
+                            log_label: "Anthropic POST", log_handle: @log_handle)
     JSON.parse(res.body)
   rescue => e
     { "type" => "error", "error" => { "message" => "#{e.class}: #{e.message}" } }

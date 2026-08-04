@@ -42,7 +42,7 @@ class Provider
 
     def build(model_id)
       provider_id, mid = parse_model_spec(model_id)
-      OpencodeProvider.new(base_url: base_url, provider_id: provider_id, model_id: mid)
+      OpencodeProvider.new(base_url: base_url, provider_id: provider_id, model_id: mid, debug: HTTP.debug_enabled)
     end
 
     def resolve_manual_input(input, model_list)
@@ -156,12 +156,13 @@ end
 
 # Talks to a local `opencode serve` HTTP server.
 class OpencodeProvider
-  def initialize(base_url:, provider_id:, model_id:)
+  def initialize(base_url:, provider_id:, model_id:, debug: false)
     @base       = URI(base_url)
     @provider_id = provider_id
     @model_id    = model_id
     @password    = ENV["OPENCODE_SERVER_PASSWORD"]
     @session_id  = nil
+    @log_handle  = HTTP.open_log if debug
   end
 
   def label
@@ -219,6 +220,7 @@ class OpencodeProvider
   rescue => e
     events << { kind: :error, text: "opencode: #{e.class}: #{e.message}" }
   ensure
+    @log_handle&.close
     events << { kind: :done }
   end
 
@@ -280,6 +282,7 @@ class OpencodeProvider
       http.request(req)
     end
 
+    HTTP.log!(@log_handle, "Opencode #{method.to_s.upcase}", uri.to_s, req.each_header.to_h, req.body, res.code, res.body)
     raise "HTTP #{res.code}: #{res.body}" unless res.is_a?(Net::HTTPSuccess)
 
     # Raw text responses (e.g. some diff endpoints) — return as-is string wrapped.

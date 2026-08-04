@@ -33,7 +33,7 @@ class Provider
       key = Settings.api_key(api_key_env) || Settings.api_key("GOOGLE_API_KEY")
       raise Settings::MissingApiKeyError, api_key_env if key.nil? || key.empty?
 
-      GoogleProvider.new(api_key: key, model: model_id)
+      GoogleProvider.new(api_key: key, model: model_id, debug: HTTP.debug_enabled)
     end
 
     def show_model_id_in_picker?
@@ -51,10 +51,11 @@ class GoogleProvider < OpenaiProvider
   ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
   MAX_OUT_TOKENS = 8192
 
-  def initialize(api_key:, model:)
+  def initialize(api_key:, model:, debug: false)
     @api_key = Settings.sanitize_api_key(api_key)
     @model   = model
     @uri     = URI(ENDPOINT)
+    @log_handle = HTTP.open_log if debug
   end
 
   def label
@@ -69,22 +70,21 @@ class GoogleProvider < OpenaiProvider
       return { "error" => { "message" => "GEMINI_API_KEY is empty — re-enter it via /providers" } }
     end
 
-    req = Net::HTTP::Post.new(@uri)
-    req["Authorization"] = "Bearer #{key}"
-    req["Content-Type"]  = "application/json"
-
-    req.body = JSON.generate(
+    body = JSON.generate(
       model: @model,
       max_tokens: [MAX_TOKENS, MAX_OUT_TOKENS].min,
       messages: [{ role: "system", content: active_system }] + messages,
       tools: openai_tool_schemas,
       tool_choice: "auto"
     )
+    headers = {
+      "Authorization" => "Bearer #{key}",
+      "Content-Type"  => "application/json"
+    }
 
-    res = Net::HTTP.start(@uri.host, @uri.port, use_ssl: true, read_timeout: 120) do |http|
-      http.request(req)
-    end
-    JSON.parse(res.body)
+    res = HTTP.request(@uri, body: body, headers: headers, read_timeout: 120,
+                            log_label: "Google POST", log_handle: @log_handle)
+    parse_response(res.body)
   rescue => e
     { "error" => { "message" => "#{e.class}: #{e.message}" } }
   end

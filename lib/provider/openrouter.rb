@@ -6,6 +6,7 @@ require "uri"
 
 require_relative "../agent_cli/constants"
 require_relative "../agent_cli/tools"
+require_relative "../agent_cli/settings"
 require_relative "base"
 require_relative "openai"
 
@@ -36,7 +37,7 @@ class Provider
     end
 
     def build(model_id)
-      OpenrouterProvider.new(api_key: Settings.require_api_key(api_key_env), model: model_id)
+      OpenrouterProvider.new(api_key: Settings.require_api_key(api_key_env), model: model_id, debug: HTTP.debug_enabled)
     end
 
     def show_model_id_in_picker?
@@ -55,12 +56,13 @@ class OpenrouterProvider < OpenaiProvider
   # OpenRouter / free models often reject huge max_tokens.
   MAX_OUT_TOKENS = 8192
 
-  def initialize(api_key:, model:)
+  def initialize(api_key:, model:, debug: false)
     @api_key = Settings.sanitize_api_key(api_key)
     @model   = model
     @uri     = URI(ENDPOINT)
     @site_url  = env_blank("OPENROUTER_SITE_URL", "https://github.com/local/agent-cli")
     @site_name = env_blank("OPENROUTER_SITE_NAME", "agent-cli")
+    @log_handle = HTTP.open_log if debug
   end
 
   def label
@@ -80,23 +82,22 @@ class OpenrouterProvider < OpenaiProvider
       return { "error" => { "message" => "OPENROUTER_API_KEY is empty — re-enter it via /providers" } }
     end
 
-    req = Net::HTTP::Post.new(@uri)
-    req["Authorization"] = "Bearer #{key}"
-    req["Content-Type"]  = "application/json"
-    req["HTTP-Referer"]  = @site_url
-    req["X-Title"]       = @site_name
-
-    req.body = JSON.generate(
+    body = JSON.generate(
       model: @model,
       max_tokens: [MAX_TOKENS, MAX_OUT_TOKENS].min,
       messages: [{ role: "system", content: active_system }] + messages,
       tools: openai_tool_schemas,
       tool_choice: "auto"
     )
+    headers = {
+      "Authorization" => "Bearer #{key}",
+      "Content-Type"  => "application/json",
+      "HTTP-Referer"  => @site_url,
+      "X-Title"       => @site_name
+    }
 
-    res = Net::HTTP.start(@uri.host, @uri.port, use_ssl: true, read_timeout: 120) do |http|
-      http.request(req)
-    end
+    res = HTTP.request(@uri, body: body, headers: headers, read_timeout: 120,
+                            log_label: "OpenRouter POST", log_handle: @log_handle)
     parse_response(res.body)
   rescue => e
     { "error" => { "message" => "#{e.class}: #{e.message}" } }

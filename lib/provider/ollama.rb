@@ -7,6 +7,7 @@ require "uri"
 require_relative "../agent_cli/constants"
 require_relative "../agent_cli/model"
 require_relative "../agent_cli/tools"
+require_relative "../agent_cli/settings"
 require_relative "base"
 require_relative "openai"
 
@@ -27,12 +28,10 @@ class Provider
       uri = URI.join(base_url.end_with?("/") ? base_url : "#{base_url}/", "api/tags")
 
       req = Net::HTTP::Get.new(uri)
-      res = Net::HTTP.start(
-        uri.host, uri.port,
-        use_ssl: uri.scheme == "https",
-        open_timeout: 3,
-        read_timeout: 5
-      ) { |http| http.request(req) }
+      res = Net::HTTP.start(uri.host, uri.port,
+                             use_ssl: uri.scheme == "https",
+                             open_timeout: 3,
+                             read_timeout: 5) { |http| http.request(req) }
 
       raise "HTTP #{res.code}: #{res.body}" unless res.is_a?(Net::HTTPSuccess)
 
@@ -47,7 +46,7 @@ class Provider
     end
 
     def build(model_id)
-      OllamaProvider.new(base_url: base_url, model: model_id)
+      OllamaProvider.new(base_url: base_url, model: model_id, debug: HTTP.debug_enabled)
     end
 
     def show_model_id_in_picker?
@@ -90,10 +89,11 @@ class OllamaProvider < OpenaiProvider
   # Local models often need more wall-clock time than cloud APIs.
   READ_TIMEOUT = 300
 
-  def initialize(base_url:, model:)
+  def initialize(base_url:, model:, debug: false)
     @model = model
     base = base_url.to_s.sub(%r{/+\z}, "")
     @uri = URI("#{base}/v1/chat/completions")
+    @log_handle = HTTP.open_log if debug
   end
 
   def label
@@ -103,25 +103,20 @@ class OllamaProvider < OpenaiProvider
   private
 
   def post(messages)
-    req = Net::HTTP::Post.new(@uri)
-    req["Content-Type"] = "application/json"
-    # Ollama ignores the key locally; some reverse proxies still expect a value.
-    req["Authorization"] = "Bearer ollama"
-
-    req.body = JSON.generate(
+    body = JSON.generate(
       model: @model,
       max_tokens: [MAX_TOKENS, MAX_OUT_TOKENS].min,
       messages: [{ role: "system", content: active_system }] + messages,
       tools: openai_tool_schemas,
       tool_choice: "auto"
     )
+    headers = {
+      "Authorization" => "Bearer ollama",
+      "Content-Type"  => "application/json"
+    }
 
-    res = Net::HTTP.start(
-      @uri.host, @uri.port,
-      use_ssl: @uri.scheme == "https",
-      open_timeout: 5,
-      read_timeout: READ_TIMEOUT
-    ) { |http| http.request(req) }
+    res = HTTP.request(@uri, body: body, headers: headers, read_timeout: READ_TIMEOUT,
+                            log_label: "Ollama POST", log_handle: @log_handle)
     parse_response(res.body)
   rescue => e
     { "error" => { "message" => "#{e.class}: #{e.message}" } }
