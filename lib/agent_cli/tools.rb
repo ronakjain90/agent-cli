@@ -121,6 +121,15 @@ module Tools
 
   COMMAND_ALIASES = %w[shell bash sh zsh run_shell run_bash execute exec terminal command].freeze
 
+  # Tool calls in one turn run concurrently, so a path is locked for the whole
+  # read-modify-write of an edit.
+  FILE_LOCKS = {}
+  FILE_LOCKS_MUTEX = Mutex.new
+
+  # A shell command can touch any path, so there is nothing finer to lock on
+  # than "one command at a time".
+  SHELL_MUTEX = Mutex.new
+
   class << self
     # Callable that receives (tool_name, detail) and returns :allow, :always, or :deny.
     # Set by the TUI so the worker thread can block until the user answers.
@@ -202,16 +211,7 @@ module Tools
       when "read_file"
         read_file(input)
       when "write_file"
-        path = require_arg!(input, "path")
-        abs = Sandbox.ensure_writable!(path)
-        new_content = input["content"].to_s
-        existed = File.exist?(abs)
-        old_content = existed ? File.read(abs) : ""
-        File.write(abs, new_content)
-        d = Diff.unified(path, old_content, new_content)
-        diff_info = d.empty? ? nil : d
-        label = existed ? "wrote #{path} (#{new_content.bytesize} bytes)" : "created #{path} (#{new_content.bytesize} bytes)"
-        [label, "ok", diff_info]
+        write_file(input)
       when "edit_file"
         edit_file(input)
       when "list_files"
@@ -250,7 +250,7 @@ module Tools
     # @raise [ArgumentError] if "path" is missing or the range is out of bounds
     def read_file(input)
       path = require_arg!(input, "path")
-      body = File.read(path)
+      body = with_file_lock(path) { File.read(path) }
 
       start_line = input["start_line"]
       end_line   = input["end_line"]
@@ -273,6 +273,31 @@ module Tools
 
       body = body[0, MAX_READ_BYTES] + "\n…[truncated]" if body.bytesize > MAX_READ_BYTES
       ["read #{path}", body]
+    end
+
+    # Create a new file or replace one wholesale. Held under the path's lock so
+    # a concurrent edit_file never sees the file half-written.
+    #
+    # @param input [Hash] tool arguments
+    # @option input [String] "path" file to write (required)
+    # @option input [String] "content" the file's new contents
+    # @return [Array(String, String, String)] +[summary, "ok", unified_diff]+
+    def write_file(input)
+      path = require_arg!(input, "path")
+      abs = Sandbox.ensure_writable!(path)
+      new_content = input["content"].to_s
+
+      old_content, existed = with_file_lock(path) do
+        existed = File.exist?(abs)
+        old = existed ? File.read(abs) : ""
+        File.write(abs, new_content)
+        [old, existed]
+      end
+
+      d = Diff.unified(path, old_content, new_content)
+      diff_info = d.empty? ? nil : d
+      label = existed ? "wrote #{path} (#{new_content.bytesize} bytes)" : "created #{path} (#{new_content.bytesize} bytes)"
+      [label, "ok", diff_info]
     end
 
     # Anchored replacement: swap an exact +old_string+ for +new_string+ in an
@@ -299,28 +324,35 @@ module Tools
       replace_all = input["replace_all"] ? true : false
 
       abs = Sandbox.ensure_writable!(path)
-      unless File.exist?(abs)
-        raise ArgumentError, "#{path} does not exist. Use write_file to create a new file."
-      end
       if old_string == new_string
         raise ArgumentError, "old_string and new_string are identical — nothing to change."
       end
 
-      old_content = File.read(abs)
-      count = old_content.scan(old_string).length
-      if count.zero?
-        raise ArgumentError,
-          "old_string was not found in #{path}. It must match the file exactly, including " \
-          "whitespace and indentation. Read the file and copy the snippet verbatim."
-      end
-      if count > 1 && !replace_all
-        raise ArgumentError,
-          "old_string matches #{count} places in #{path}. Add surrounding lines to make it " \
-          "unique, or set replace_all: true to replace all #{count}."
-      end
+      # The whole read-modify-write happens under the path's lock: two edits to
+      # the same file in one turn run concurrently, and without this the second
+      # would read stale content and silently drop the first edit.
+      old_content, new_content, count = with_file_lock(path) do
+        unless File.exist?(abs)
+          raise ArgumentError, "#{path} does not exist. Use write_file to create a new file."
+        end
 
-      new_content = replace_all ? old_content.gsub(old_string, new_string) : old_content.sub(old_string, new_string)
-      File.write(abs, new_content)
+        old = File.read(abs)
+        n = old.scan(old_string).length
+        if n.zero?
+          raise ArgumentError,
+            "old_string was not found in #{path}. It must match the file exactly, including " \
+            "whitespace and indentation. Read the file and copy the snippet verbatim."
+        end
+        if n > 1 && !replace_all
+          raise ArgumentError,
+            "old_string matches #{n} places in #{path}. Add surrounding lines to make it " \
+            "unique, or set replace_all: true to replace all #{n}."
+        end
+
+        updated = replace_all ? old.gsub(old_string, new_string) : old.sub(old_string, new_string)
+        File.write(abs, updated)
+        [old, updated, n]
+      end
 
       d = Diff.unified(path, old_content, new_content)
       diff_info = d.empty? ? nil : d
@@ -360,6 +392,12 @@ module Tools
       argv, refusal = Sandbox.wrap(cmd)
       return ["blocked (no sandbox): #{cmd}", refusal] if argv.nil?
 
+      # One command at a time, even when a turn issues several: they share a
+      # working directory, and their permission prompts share one TUI slot.
+      SHELL_MUTEX.synchronize { execute_command(cmd, argv, skip_permission) }
+    end
+
+    def execute_command(cmd, argv, skip_permission)
       unless skip_permission || shell_permitted? || auto_allowed?(cmd)
         case request_permission("run_command", cmd)
         when :always
@@ -499,6 +537,14 @@ module Tools
 
       # One outstanding prompt at a time, even with parallel workers.
       APPROVAL_MUTEX.synchronize { approver.call(tool, detail) }
+    end
+
+    # Serializes access to one path across the concurrently running tool calls
+    # of a turn. Locks are per expanded path, so different files never block.
+    def with_file_lock(path, &block)
+      key = File.expand_path(path)
+      lock = FILE_LOCKS_MUTEX.synchronize { FILE_LOCKS[key] ||= Mutex.new }
+      lock.synchronize(&block)
     end
   end
 end

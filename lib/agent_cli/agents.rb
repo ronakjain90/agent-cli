@@ -34,6 +34,8 @@ module Agents
     How to work:
     - For small or quick tasks, just use the tools yourself. To change an existing file, use
       `edit_file` with an exact snippet — reserve `write_file` for creating new files.
+    - Emit independent tool calls together in ONE response — they run in parallel. Split them
+      across responses only when a later call needs an earlier one's result.
     - For larger tasks, split the work into independent subtasks and `delegate` each one.
       A worker does NOT see this conversation, so its brief must be complete on its own:
       say exactly what to do, which files/paths are involved, and what to report back.
@@ -57,6 +59,8 @@ module Agents
 
     Rules:
     - Stay strictly within your assigned subtask — do not expand the scope.
+    - Emit independent tool calls together in ONE response — they run in parallel. Split them
+      across responses only when a later call needs an earlier one's result.
     - After changing code, verify it with the `run_tests` tool before reporting back.
     - When finished, end with a short report: what you changed or found, the key file paths,
       and anything the manager must know. That report is the ONLY thing the manager receives,
@@ -225,49 +229,30 @@ module Delegation
   end
 
   # Execute one assistant turn's tool calls and return per-call results in the
-  # original order as [{ id:, result: }, ...]. When a turn contains two or more
-  # `delegate` calls, those workers run concurrently (capped at MAX_PARALLEL);
-  # a single delegate or plain tools run inline, preserving prior behavior.
-  #
-  # `calls` is an ordered array of { id:, name:, input: }.
+  # original order as [{ id:, result: }, ...]. Every call runs concurrently,
+  # MAX_PARALLEL at a time; Tools locks the paths and the shell so overlapping
+  # calls can't corrupt each other.
   def run_tool_batch(calls, events, depth)
-    delegate_positions = (0...calls.length).select do |i|
-      calls[i][:name] == Agents::DELEGATE_TOOL_NAME
-    end
-
-    if delegate_positions.length < 2
-      # Sequential: announce each call, run it, emit its result inline.
-      return calls.map do |c|
-        events << { kind: :tool, text: announce_text(c), depth: depth }
-        emit_tool_result(events, c, run_call(c, events, depth), depth)
-      end
-    end
-
-    # Parallel fan-out. Announce every call up front so the UI shows all the
-    # delegations before their interleaved worker logs stream in.
-    calls.each do |c|
-      events << { kind: :tool, text: announce_text(c), depth: depth }
-    end
+    calls.each { |c| events << { kind: :tool, text: announce_text(c), depth: depth } }
 
     outcomes = Array.new(calls.length)
-
-    # Non-delegate tools run inline (they touch the filesystem/shell serially).
-    (0...calls.length).each do |i|
-      next if delegate_positions.include?(i)
-      outcomes[i] = run_call(calls[i], events, depth)
-    end
-
-    # Delegates run concurrently, in capped slices.
-    delegate_positions.each_slice(Agents::MAX_PARALLEL) do |slice|
-      slice.map do |i|
-        Thread.new { outcomes[i] = run_worker(calls[i][:input] || {}, events, depth) }
-      end.each(&:join)
+    calls.each_index.each_slice(Agents::MAX_PARALLEL) do |slice|
+      slice.map { |i| Thread.new { outcomes[i] = run_call_safely(calls[i], events, depth) } }
+           .each(&:join)
     end
 
     calls.each_index.map { |i| emit_tool_result(events, calls[i], outcomes[i], depth) }
   end
 
   private
+
+  # A raised exception would otherwise surface at `join` and abort the whole
+  # batch, losing the other calls' results.
+  def run_call_safely(call, events, depth)
+    run_call(call, events, depth)
+  rescue => e
+    ["error in #{call[:name]}: #{e.message}", "Error: #{e.class}: #{e.message}"]
+  end
 
   # UI text announcing a tool call. Parse-failed calls have no usable input.
   def announce_text(call)
