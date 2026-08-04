@@ -198,7 +198,7 @@ Beyond the OS sandbox, `run_command` gates execution with a permission prompt:
   skip the prompt. Auto-allow only applies to commands with no shell
   metacharacters (`; & | > < $( )` / newlines); subcommand tools like `git …`,
   `npm …`, `docker …` persist a two-token prefix.
-- Set `AGENT_ALLOW_SHELL=1` to skip all permission prompts (the OS sandbox still
+- Launch with `--yolo` to skip all permission prompts (the OS sandbox still
   applies).
 
 ---

@@ -53,11 +53,17 @@
 # Shell execution (anthropic / openai / openrouter / google / groq / ollama) asks for permission
 # by default (y once · a session · p permanently · n deny). Read-only git commands
 # (git status/log/diff/…) are always allowed. Skip all prompts with:
-#   AGENT_ALLOW_SHELL=1 ruby agent-cli.rb
+#   ruby agent-cli.rb --yolo
 #
 # Keys (chat):  type a request, Enter to send · /providers to switch · ctrl+c quit
 # Keys (picker): ↑/↓ move · enter select · esc back · ctrl+c quit
-# Keys (permission): y/enter allow once · a allow session · p allow permanently · n/esc deny · ctrl+c quit
+# Keys (permission): y/enter allow once · a allow session · p allow permanently · n/esc deny · esc back · ctrl+c quit
+
+# Parse --yolo flag before loading anything else: in yolo mode the agent skips
+# all permission prompts for shell commands.
+if ARGV.delete("--yolo")
+  ENV["AGENT_ALLOW_SHELL"] = "1"
+end
 
 $LOAD_PATH.unshift File.expand_path("lib", __dir__)
 require "agent_cli"

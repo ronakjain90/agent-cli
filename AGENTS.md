@@ -15,7 +15,7 @@ Key features:
 - **Multi-agent orchestration**: the top-level agent runs as a *manager* with normal file/shell tools **plus** a `delegate` tool that spawns fresh worker agents for focused subtasks. Independent subtasks delegated in one turn run in parallel (capped at `Agents::MAX_PARALLEL = 6`). Workers recurse up to `Agents::MAX_DEPTH = 2`.
 - **Provider auto-config**: remembers your last provider/model in `~/.config/agent-cli/preferences.json`, saves named "model sets" switchable via `/models`, and lets workers run on a different (e.g. cheaper) model.
 - **Shell safety**: destructive commands prompt for permission (`y`/`a`/`p`/`n`); read-only `git` commands are auto-allowed. Persist command prefixes to skip future prompts.
-  - `AGENT_ALLOW_SHELL=1` skips all prompts.
+  - `--yolo` skips all permission prompts.
 - `/init` can analyze the repo and write an `AGENTS.md`.
 
 ## 2. Architecture / Components
@@ -113,7 +113,7 @@ Ruby version: `ruby-4.0.0` (`.ruby-version`).
 This repo *is itself* a coding agent — treat changes through the lens of how an agent uses the tool surface:
 
 - When editing existing files, use `edit_file` with an **exact verbatim `old_string`**; never rewrite files wholesale with `write_file` unless creating them. Match whitespace/indentation exactly — anchors must be unique (or use `replace_all`).
-- When running shell commands you author while developing: prefer git read-only subcommands (`git status`, `git diff`, …) which need no prompt; for anything else ensure `AGENT_ALLOW_SHELL=1` or be ready to approve.
+- When running shell commands you author while developing: prefer git read-only subcommands (`git status`, `git diff`, …) which need no prompt; for anything else use `--yolo` or be ready to approve.
 - The `delegate` tool (and the multi-agent caps `MAX_DEPTH = 2`, `MAX_PARALLEL = 6`) are exposed by the `Delegation` module in `lib/agent_cli/agents.rb`, which `AnthropicProvider` and `OpenaiProvider` mix in; `OpencodeProvider` does not — do not raise unbounded fan-out without lowering `MAX_PARALLEL`.
 - The `opencode` provider **owns its own edit tools** — it does *not* use `Tools.call`; it reads diffs from the server via `/session/:id/diff` and reports them as `:diff` events for the panel.
 - Provider `build(model_id)` may raise `Settings::MissingApiKeyError` — the TUI routes this to the in-TUI key entry; preserve that contract.
