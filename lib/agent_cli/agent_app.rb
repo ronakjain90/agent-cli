@@ -144,7 +144,7 @@ class AgentApp
         @frame = (@frame + 1) % SPINNER.length
         [self, tick]
       else
-        [self, nil]
+        [self, tick]
       end
 
     when Bubbletea::KeyMessage
@@ -498,6 +498,11 @@ end
   end
 
   def update_chat(message)
+    if @thinking && message.esc?
+      interrupt_agent
+      return [self, nil]
+    end
+
     return [self, nil] if @thinking
 
     if @diffs.any? && @input.empty?
@@ -1598,6 +1603,17 @@ end
         end
       end
     end
+  end
+
+  # Kill the running worker thread to interrupt a turn in progress.
+  def interrupt_agent
+    @thinking = false
+    wt = @worker_thread
+    if wt&.alive?
+      wt.kill
+      @log << { kind: :assistant, text: "— interrupted —" }
+    end
+    @worker_thread = nil
   end
 
   def visible_log
