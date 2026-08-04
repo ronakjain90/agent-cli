@@ -343,16 +343,18 @@ module Tools
     # never run unconfined.
     #
     # @param cmd [String] the shell command to run
+    # @param skip_permission [Boolean] when true, bypasses the user-permission
+    #   prompt (used by run_tests, which is a safe, auto-detected test runner).
     # @return [Array(String, String)] +[summary_for_ui, combined_output]+; the
     #   summary is +"ran (sandboxed): …"+, +"blocked (no sandbox): …"+, or
     #   +"denied: …"+
-    def run_command(cmd)
+    def run_command(cmd, skip_permission: false)
       # Fail closed: if no sandbox backend is available, refuse before doing
       # anything else (including prompting) — commands are never run unconfined.
       argv, refusal = Sandbox.wrap(cmd)
       return ["blocked (no sandbox): #{cmd}", refusal] if argv.nil?
 
-      unless shell_permitted? || auto_allowed?(cmd)
+      unless skip_permission || shell_permitted? || auto_allowed?(cmd)
         case request_permission("run_command", cmd)
         when :always
           allow_shell_session!
@@ -398,7 +400,7 @@ module Tools
           "AGENT_TEST_COMMAND environment variable, or add a \"test_command\" to the " \
           "agent-cli preferences file."
       end
-      run_command(apply_test_path(base, input["path"]))
+      run_command(apply_test_path(base, input["path"]), skip_permission: true)
     end
 
     # Pick the test command from, in order: an explicit +runner+ argument, the

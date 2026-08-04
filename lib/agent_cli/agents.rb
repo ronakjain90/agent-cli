@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require_relative "tools"
-require_relative "tool_loop_guard"
 
 # Manager -> worker multi-agent orchestration.
 #
