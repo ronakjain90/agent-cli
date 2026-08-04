@@ -13,3 +13,4 @@ MAX_LCS_LINES   = 5_000
 # run_command rate limit: max commands per trailing window (seconds), per session.
 COMMAND_RATE_WINDOW     = 60.0
 MAX_COMMANDS_PER_WINDOW = 60
+COMMAND_TIMEOUT = 120.0

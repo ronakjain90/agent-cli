@@ -419,10 +419,48 @@ module Tools
       end
 
       # argv runs directly (no wrapping shell); it is always sandboxed here.
-      out, _status = Open3.capture2e(*argv)
+      out, timed_out = capture_with_timeout(argv, COMMAND_TIMEOUT)
       out = out[0, MAX_READ_BYTES]
       out = "(no output)" if out.empty?
+
+      if timed_out
+        return ["timed out (#{COMMAND_TIMEOUT.to_i}s): #{cmd}",
+                "Command killed after #{COMMAND_TIMEOUT.to_i}s. Partial output below. Re-run " \
+                "something narrower (scope the path, add a limit) rather than repeating this.\n\n#{out}"]
+      end
+
       ["ran (sandboxed): #{cmd}", out]
+    end
+
+    # Capture stdout+stderr, killing the command if it outlives +timeout+.
+    # Own process group, so the kill also takes the sandbox's inner shell; the
+    # +ensure+ repeats it on thread kill, which is how `esc` reclaims a command.
+    def capture_with_timeout(argv, timeout)
+      stdin, out_io, wait_thr = Open3.popen2e(*argv, pgroup: true)
+      stdin.close
+      pid = wait_thr.pid
+      reader = Thread.new { out_io.read.to_s }
+
+      timed_out = wait_thr.join(timeout).nil?
+      terminate_group(pid) if timed_out
+
+      # The kill closes the pipe, so the reader finishes either way.
+      out = reader.join(5) ? reader.value.to_s : ""
+      [out, timed_out]
+    ensure
+      terminate_group(pid) if pid && wait_thr&.alive?
+      reader&.kill
+      out_io&.close unless out_io.nil? || out_io.closed?
+    end
+
+    # TERM then KILL the whole process group. Every failure mode here means
+    # "already gone", so they are all swallowed.
+    def terminate_group(pid)
+      Process.kill("TERM", -pid)
+      sleep 0.2
+      Process.kill("KILL", -pid)
+    rescue Errno::ESRCH, Errno::EPERM, RangeError
+      nil
     end
 
     # Resolve the project's test command and run it through the same confined

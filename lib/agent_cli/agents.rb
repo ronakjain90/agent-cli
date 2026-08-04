@@ -237,11 +237,21 @@ module Delegation
 
     outcomes = Array.new(calls.length)
     calls.each_index.each_slice(Agents::MAX_PARALLEL) do |slice|
-      slice.map { |i| Thread.new { outcomes[i] = run_call_safely(calls[i], events, depth) } }
-           .each(&:join)
+      threads = slice.map do |i|
+        Thread.new do
+          outcomes[i] = run_call_safely(calls[i], events, depth)
+          emit_tool_event(events, outcomes[i], depth)
+        end
+      end
+
+      begin
+        threads.each(&:join)
+      ensure
+        threads.each(&:kill)
+      end
     end
 
-    calls.each_index.map { |i| emit_tool_result(events, calls[i], outcomes[i], depth) }
+    calls.each_index.map { |i| result_for(calls[i], outcomes[i]) }
   end
 
   private
@@ -260,11 +270,16 @@ module Delegation
     "#{call[:name]} #{JSON.generate(call[:input])}"
   end
 
-  def emit_tool_result(events, call, outcome, depth)
-    summary, result, diff = outcome
+  def emit_tool_event(events, outcome, depth)
+    summary, _result, diff = outcome
     event = { kind: :tool_result, text: summary, depth: depth }
     event[:diff] = diff if diff
     events << event
+  end
+
+  def result_for(call, outcome)
+    _summary, result, _diff = outcome
+    result = "Error: tool call did not complete." if outcome.nil?
     { id: call[:id], result: result.to_s }
   end
 
