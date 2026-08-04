@@ -14,6 +14,12 @@ module Agents
   # only while its depth is below MAX_DEPTH, which bounds the recursion.
   MAX_DEPTH = 2
 
+  # Context-window budget; past it, the oldest tool results are compacted away.
+  MAX_CONTEXT_TOKENS = 60_000
+
+  # Rough heuristic: ~4 characters per token.
+  CHARS_PER_TOKEN = 4
+
   # Cap on workers running at once within a single delegation batch, so a
   # manager that fans out many subtasks doesn't open unbounded connections.
   MAX_PARALLEL = 6
@@ -100,6 +106,62 @@ module Agents
     return WORKER_SYSTEM unless depth.zero?
 
     [MANAGER_SYSTEM, agents_context].compact.join("\n")
+  end
+
+  COMPACTED_PLACEHOLDER = "[earlier tool result omitted — re-run the tool for full output]"
+
+  def estimate_tokens(messages)
+    messages.sum { |msg| message_chars(msg) } / CHARS_PER_TOKEN
+  end
+
+  # Handles string content and OpenAI ("text") / Anthropic ("content") parts.
+  def message_chars(msg)
+    content = msg["content"]
+    return 0 unless content
+    return content.length unless content.is_a?(Array)
+
+    content.sum do |part|
+      next part.to_s.length unless part.is_a?(Hash)
+
+      (part["text"] || part["content"] || part).to_s.length
+    end
+  end
+
+  # Either wire format: OpenAI's "tool" role, or Anthropic's tool_result parts.
+  def tool_result?(msg)
+    return true if msg["role"] == "tool"
+    return false unless msg["role"] == "user" && msg["content"].is_a?(Array)
+
+    msg["content"].any? { |part| part.is_a?(Hash) && part["type"] == "tool_result" }
+  end
+
+  def compacted_message(msg)
+    return msg.merge("content" => COMPACTED_PLACEHOLDER) if msg["role"] == "tool"
+
+    msg.merge("content" => msg["content"].map do |part|
+      next part unless part.is_a?(Hash) && part["type"] == "tool_result"
+
+      part.merge("content" => COMPACTED_PLACEHOLDER)
+    end)
+  end
+
+  # Trims oldest tool results in place — the caller's array is the live
+  # conversation the UI reads, so it must stay the same object.
+  def compact_messages(messages)
+    budget = MAX_CONTEXT_TOKENS * CHARS_PER_TOKEN
+    remaining = messages.sum { |msg| message_chars(msg) }
+    return messages if remaining <= budget
+
+    messages.each_index do |i|
+      break if remaining <= budget
+      next unless tool_result?(messages[i])
+
+      before = message_chars(messages[i])
+      messages[i] = compacted_message(messages[i])
+      remaining -= before - message_chars(messages[i])
+    end
+
+    messages
   end
 
   # AGENTS.md wrapped for the system prompt, or nil when the file is absent or

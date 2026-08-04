@@ -220,7 +220,6 @@ class OpencodeProvider
   rescue => e
     events << { kind: :error, text: "opencode: #{e.class}: #{e.message}" }
   ensure
-    @log_handle&.close
     events << { kind: :done }
   end
 

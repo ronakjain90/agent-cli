@@ -62,7 +62,6 @@ class AnthropicProvider
   def run_turn(messages, events)
     agent_run(messages, events, system: Agents.system_for(0), tools: Agents.tools_for(0), depth: 0)
   ensure
-    @log_handle&.close
     events << { kind: :done }
   end
 
@@ -104,6 +103,7 @@ class AnthropicProvider
       end
 
       messages << { "role" => "user", "content" => results }
+      messages = Agents.compact_messages(messages)
     end
 
     final_text
@@ -117,13 +117,11 @@ class AnthropicProvider
       max_tokens: MAX_TOKENS,
       system: system,
       tools: tools,
-      messages: messages,
-      context_management: CONTEXT_MANAGEMENT
+      messages: messages
     )
     headers = {
       "x-api-key" => @api_key,
       "anthropic-version" => "2023-06-01",
-      "anthropic-beta" => CONTEXT_MANAGEMENT_BETA,
       "content-type" => "application/json"
     }
 

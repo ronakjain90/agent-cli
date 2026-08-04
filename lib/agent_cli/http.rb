@@ -54,8 +54,10 @@ module HTTP
     end
 
     # Log a full request/response envelope. Sensitive headers are masked.
+    # Flushed per entry so nothing needs to close the handle — closing between
+    # turns is what made the next turn's write raise `IOError: closed stream`.
     def log!(handle, label, uri, headers, body, response_status, response_body)
-      return unless handle
+      return if handle.nil? || handle.closed?
 
       handle.puts("=" * 70)
       handle.puts("[#{Time.now.iso8601}] #{label}")
@@ -71,6 +73,7 @@ module HTTP
       handle.puts("[#{Time.now.iso8601}] Response body:")
       handle.puts(format_body(response_body))
       handle.puts
+      handle.flush
     end
 
     # Execute an HTTP request with debug logging. Returns the Net::HTTPResponse.

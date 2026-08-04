@@ -188,6 +188,14 @@ module Tools
     # @return [Array(String, String, String)] the same, plus a unified diff, for
     #   tools that modify a file
     def call(name, input)
+      summary, result, diff = dispatch(name, input)
+      [summary, truncate_for_model(result), diff]
+    end
+
+    private
+
+    # Results flow back through {call}, which caps them — handlers don't.
+    def dispatch(name, input)
       input = input || {}
       name = "run_command" if COMMAND_ALIASES.include?(name)
       case name
@@ -228,8 +236,6 @@ module Tools
     rescue => e
       ["error in #{name}: #{e.message}", "Error: #{e.class}: #{e.message}"]
     end
-
-    private
 
     # Read a file, optionally just a 1-indexed inclusive line range. Ranged
     # reads keep context small on large files (the model asks for the slice it
@@ -478,6 +484,14 @@ module Tools
       return "yarn test" if File.exist?("yarn.lock")
 
       "npm test"
+    end
+
+    def truncate_for_model(text)
+      text = text.to_s
+      return text if text.bytesize <= MAX_MODEL_OUTPUT_BYTES
+
+      text[0, MAX_MODEL_OUTPUT_BYTES] +
+        "\n…[truncated at #{MAX_MODEL_OUTPUT_BYTES} bytes — re-run narrowed (e.g. a line range) for more]"
     end
 
     def request_permission(tool, detail)

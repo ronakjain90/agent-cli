@@ -65,7 +65,6 @@ class OpenaiProvider
   def run_turn(messages, events)
     agent_run(messages, events, system: Agents.system_for(0), tools: Agents.tools_for(0), depth: 0)
   ensure
-    @log_handle&.close
     events << { kind: :done }
   end
 
@@ -132,6 +131,7 @@ class OpenaiProvider
       run_tool_batch(calls, events, depth).each do |r|
         messages << { "role" => "tool", "tool_call_id" => r[:id], "content" => r[:result] }
       end
+      messages = Agents.compact_messages(messages)
     end
 
     final_text
