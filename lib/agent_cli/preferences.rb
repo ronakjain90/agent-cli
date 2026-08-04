@@ -134,6 +134,14 @@ class Preferences
     slug[0, 32]
   end
 
+  # An explicit test command to pin for this project, overriding auto-detection
+  # (the run_tests tool falls back to detection when this is unset). Set by
+  # hand in the preferences file or via the AGENT_TEST_COMMAND env var.
+  def self.test_command
+    cmd = read_raw["test_command"]
+    cmd.is_a?(String) && !cmd.strip.empty? ? cmd.strip : nil
+  end
+
   # Command prefixes the user has chosen to always allow without prompting.
   def self.allowed_commands
     data = read_raw

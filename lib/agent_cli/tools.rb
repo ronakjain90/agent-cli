@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "json"
 require "open3"
 
 require_relative "constants"
@@ -97,6 +98,23 @@ module Tools
         type: "object",
         properties: { command: { type: "string" } },
         required: ["command"]
+      }
+    },
+    {
+      name: "run_tests",
+      description:
+        "Run the project's test suite and return its output. Prefer this over " \
+        "run_command for running tests: the runner is auto-detected for the " \
+        "project (RSpec, Rails/minitest, rake, pytest, jest/npm, go test, cargo). " \
+        "Pass `path` to run a single test file or directory instead of the whole " \
+        "suite, or `runner` to override the detected command. Runs sandboxed and " \
+        "may require user approval, exactly like run_command.",
+      input_schema: {
+        type: "object",
+        properties: {
+          path:   { type: "string", description: "Optional test file or directory to run instead of the whole suite (appended to the runner; best for rspec/minitest/pytest)." },
+          runner: { type: "string", description: "Optional explicit test command to use instead of auto-detection, e.g. \"bin/rails test\" or \"bundle exec rspec\"." }
+        }
       }
     }
   ].freeze
@@ -196,6 +214,8 @@ module Tools
         ["list #{path}", entries.join("\n")]
       when "run_command"
         run_command(require_arg!(input, "command"))
+      when "run_tests"
+        run_tests(input)
       else
         valid = DEFINITIONS.map { |d| d[:name] }.join(", ")
         ["unknown tool #{name}",
@@ -357,6 +377,105 @@ module Tools
       out = out[0, MAX_READ_BYTES]
       out = "(no output)" if out.empty?
       ["ran (sandboxed): #{cmd}", out]
+    end
+
+    # Resolve the project's test command and run it through the same confined
+    # path as {run_command} (sandbox + permission + rate limit). A specialized
+    # tool rather than raw run_command so the model doesn't have to guess the
+    # right runner (e.g. rspec in a minitest repo) — detection picks it.
+    #
+    # @param input [Hash] tool arguments
+    # @option input [String] "path" a single test file/dir to run (optional)
+    # @option input [String] "runner" explicit command overriding detection (optional)
+    # @return [Array(String, String)] +[summary_for_ui, output]+, matching run_command
+    # @raise [ArgumentError] when no runner is given and none can be detected
+    def run_tests(input)
+      base = resolve_test_command(input["runner"])
+      unless base
+        raise ArgumentError,
+          "could not detect a test command for this project. Pass `runner` explicitly " \
+          "(e.g. \"bin/rails test\", \"bundle exec rspec\", or \"pytest\"), set the " \
+          "AGENT_TEST_COMMAND environment variable, or add a \"test_command\" to the " \
+          "agent-cli preferences file."
+      end
+      run_command(apply_test_path(base, input["path"]))
+    end
+
+    # Pick the test command from, in order: an explicit +runner+ argument, the
+    # AGENT_TEST_COMMAND env var, the persisted +test_command+ preference, then
+    # filesystem auto-detection. Returns nil when nothing matches.
+    def resolve_test_command(runner)
+      explicit = runner.to_s.strip
+      return explicit unless explicit.empty?
+
+      env = ENV["AGENT_TEST_COMMAND"].to_s.strip
+      return env unless env.empty?
+
+      pref = Preferences.test_command
+      return pref if pref
+
+      detect_test_command
+    end
+
+    # Best-effort detection of the project's test runner from marker files in the
+    # working directory. Ruby is checked first (RSpec before minitest), then the
+    # common runners for other ecosystems. Returns nil when nothing is recognized.
+    def detect_test_command
+      # Ruby — RSpec (binstub > bundler > bare executable).
+      if File.exist?(".rspec") || File.directory?("spec")
+        return "bin/rspec" if File.executable?("bin/rspec")
+        return "#{bundle_prefix}rspec"
+      end
+      # Ruby — Rails default (minitest via the rails binstub).
+      return "bin/rails test" if File.executable?("bin/rails")
+      # Ruby — rake-driven minitest.
+      return "#{bundle_prefix}rake test" if File.exist?("Rakefile") && File.directory?("test")
+      # JavaScript / TypeScript — a "test" script in package.json.
+      return js_test_command if File.exist?("package.json") && package_test_script?
+      # Python — pytest.
+      if %w[pytest.ini tox.ini pyproject.toml setup.cfg].any? { |f| File.exist?(f) } || File.directory?("tests")
+        return "pytest"
+      end
+      # Go.
+      return "go test ./..." if File.exist?("go.mod")
+      # Rust.
+      return "cargo test" if File.exist?("Cargo.toml")
+
+      nil
+    end
+
+    # Append a focused test path to the base command. For go's package spec
+    # (+./...+) the path replaces it; for everything else it is appended. Runners
+    # that don't take a bare file path (rake, cargo) are better targeted with an
+    # explicit +runner+, which is documented on the tool.
+    def apply_test_path(base, path)
+      p = path.to_s.strip
+      return base if p.empty?
+      return base.sub(%r{\s*\./\.\.\.\s*\z}, " #{p}") if base.include?("./...")
+
+      "#{base} #{p}"
+    end
+
+    # "bundle exec " when the project has a Gemfile (so gem versions resolve),
+    # else "" to call the runner directly.
+    def bundle_prefix
+      File.exist?("Gemfile") ? "bundle exec " : ""
+    end
+
+    # Whether package.json declares a "test" script.
+    def package_test_script?
+      pkg = JSON.parse(File.read("package.json"))
+      pkg.is_a?(Hash) && pkg["scripts"].is_a?(Hash) && !pkg["scripts"]["test"].to_s.strip.empty?
+    rescue JSON::ParserError, SystemCallError
+      false
+    end
+
+    # The JS test command, matched to the project's package manager by lockfile.
+    def js_test_command
+      return "pnpm test" if File.exist?("pnpm-lock.yaml")
+      return "yarn test" if File.exist?("yarn.lock")
+
+      "npm test"
     end
 
     def request_permission(tool, detail)

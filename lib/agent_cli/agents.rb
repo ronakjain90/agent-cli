@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "tools"
+require_relative "tool_loop_guard"
 
 # Manager -> worker multi-agent orchestration.
 #
@@ -38,6 +39,8 @@ module Agents
       not have two workers edit the same file at once).
     - After workers report back, integrate their results, reconcile any conflicts, and give
       the user one concise final answer.
+    - After changing code, verify it with the `run_tests` tool (it auto-detects the project's
+      test runner) rather than assuming the change works.
     - Keep prose brief; let the tools and workers do the work.
   TXT
 
@@ -49,6 +52,7 @@ module Agents
 
     Rules:
     - Stay strictly within your assigned subtask — do not expand the scope.
+    - After changing code, verify it with the `run_tests` tool before reporting back.
     - When finished, end with a short report: what you changed or found, the key file paths,
       and anything the manager must know. That report is the ONLY thing the manager receives,
       so make it self-contained.
