@@ -17,8 +17,20 @@ require_relative "provider"
 require_relative "agent_cli/agent_app"
 
 module AgentCli
+  # Translate command-line flags into the env vars the rest of the app reads.
+  # Both are read lazily (Tools.shell_permitted?, Http.debug?), so this only has
+  # to run before the TUI starts.
+  #
+  #   --yolo  : skip all permission prompts for shell commands
+  #   --debug : log all provider API requests/responses to log/agent-cli-<timestamp>.log
+  def self.parse_flags!(argv = ARGV)
+    ENV["AGENT_ALLOW_SHELL"] = "1" if argv.delete("--yolo")
+    ENV["AGENT_DEBUG"] = "1" if argv.delete("--debug")
+  end
+
   # Boot the TUI. Shared by the `agent-cli` executable and the dev entrypoint.
   def self.start
+    parse_flags!
     require "bubbletea"
 
     InputDrain.patch!
