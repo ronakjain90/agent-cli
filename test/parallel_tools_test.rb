@@ -203,4 +203,76 @@ class ParallelToolsTest < Minitest::Test
       assert_match(/could not parse/, results[1][:result])
     end
   end
+
+  def test_worker_report_under_cap_is_returned_unchanged
+    calls = [call_for('1', 'delegate', { 'task' => 'short task', 'title' => 't' })]
+
+    results = @agent.run_tool_batch(calls, @events, 0)
+    assert_equal 1, results.length
+    assert_equal 'report from depth 1', results[0][:result]
+  end
+
+  def test_worker_report_over_cap_is_truncated_with_marker
+    agent = Class.new {
+      include Delegation
+      def agent_run(_messages, _events, system:, tools:, depth:)
+        'x' * 10_000
+      end
+    }.new
+
+    events = Queue.new
+    calls = [call_for('1', 'delegate', { 'task' => 'make a big report', 'title' => 'big' })]
+
+    results = agent.run_tool_batch(calls, events, 0)
+
+    report = results[0][:result]
+    assert_operator report.bytesize, :<=, Agents::WORKER_REPORT_MAX_BYTES,
+                    'truncated report must fit within the cap'
+    assert_match(/truncated/, report)
+  end
+
+  def test_truncate_worker_report_keeps_whole_lines
+    line = 'A' * 100 + "\n"
+    long_report = line * 200 # ~20.2KB
+    truncated = @agent.truncate_worker_report(long_report)
+
+    assert_operator truncated.bytesize, :<=, Agents::WORKER_REPORT_MAX_BYTES
+    assert_match(/truncated/, truncated)
+    # The truncated content should be shorter than the original in bytes
+    assert_operator truncated.bytesize, :<, long_report.bytesize
+  end
+
+  def test_truncate_worker_report_short_report_unchanged
+    short = 'tiny report'
+    assert_equal short, @agent.truncate_worker_report(short)
+  end
+
+  def test_truncate_worker_report_respects_byte_cap_with_hint
+    long_report = ('word ' * 5_000).strip # ~25KB
+    truncated = @agent.truncate_worker_report(long_report)
+
+    assert_operator truncated.bytesize, :<=, Agents::WORKER_REPORT_MAX_BYTES
+    assert_match(/truncated — full output capped at #{Agents::WORKER_REPORT_MAX_BYTES} bytes/, truncated)
+  end
+
+  def test_worker_done_event_emitted
+    events = Queue.new
+    agent = Class.new {
+      include Delegation
+      def agent_run(_messages, _events, system:, tools:, depth:)
+        'some report'
+      end
+    }.new
+
+    calls = [call_for('1', 'delegate', { 'task' => 'task', 'title' => 'title' })]
+    agent.run_tool_batch(calls, events, 0)
+
+    drained = []
+    while (e = (events.pop(true) rescue nil))
+      drained << e
+    end
+
+    worker_done = drained.find { |e| e[:kind] == :worker_done }
+    assert worker_done, 'a worker_done event should be emitted'
+  end
 end

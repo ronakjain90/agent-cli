@@ -44,6 +44,10 @@ class OpenaiProvider
 
   DEFAULT_ENDPOINT = 'https://api.openai.com/v1/chat/completions'
 
+  # OpenAI's largest models cap completions at 16k tokens; subclasses override
+  # with lower limits for models that can't handle that.
+  MAX_OUT_TOKENS = 16_384
+
   attr_reader :model, :uri
 
   def initialize(api_key:, model:, debug: false)
@@ -59,6 +63,15 @@ class OpenaiProvider
 
   def model_label
     @model
+  end
+
+  # OpenAI context windows differ by model; 200k is a safe default that covers
+  # the o1/o3-mini/gpt-4o family.
+  def context_window
+    case @model
+    when 'o1', 'o3-mini', 'gpt-4o', 'gpt-4o-mini' then 128_000
+    else 200_000
+    end
   end
 
   # Top-level user turn: run the manager agent, then signal completion.
@@ -171,6 +184,30 @@ class OpenaiProvider
 
   private
 
+  # Hook for subclasses to set a log-friendly name in HTTP traces.
+  def log_label
+    'OpenAI POST'
+  end
+
+  # Build the auth + content-type headers. Subclasses add provider-specific
+  # headers (e.g. OpenRouter's HTTP-Referer / X-Title) by overriding this.
+  def build_headers
+    {
+      'authorization' => "Bearer #{auth_token}",
+      'content-type' => 'application/json'
+    }
+  end
+
+  # The API key to send (sanitized, stripped). Defaults to @api_key.
+  def auth_token
+    @api_key.to_s.strip
+  end
+
+  # Default per-request read timeout for all OpenAI-compatible providers.
+  def read_timeout
+    120
+  end
+
   def post(messages)
     body = JSON.generate(
       model: @model,
@@ -179,13 +216,10 @@ class OpenaiProvider
       tools: openai_tool_schemas,
       tool_choice: 'auto'
     )
-    headers = {
-      'authorization' => "Bearer #{@api_key}",
-      'content-type' => 'application/json'
-    }
+    headers = build_headers
 
-    res = HTTP.request(@uri, body: body, headers: headers, read_timeout: 120,
-                             log_label: 'OpenAI POST', log_handle: @log_handle)
+    res = HTTP.request(@uri, body: body, headers: headers, read_timeout: read_timeout,
+                             log_label: log_label, log_handle: @log_handle)
     parse_response(res.body)
   rescue StandardError => e
     { 'error' => { 'message' => "#{e.class}: #{e.message}" } }

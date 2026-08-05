@@ -62,28 +62,19 @@ class GoogleProvider < OpenaiProvider
     'google'
   end
 
-  private
+  # Gemini 3.6/2.5 Flash models have 1M token context; Pro also 1M.
+  def context_window
+    1_000_000
+  end
 
+  def log_label
+    'Google POST'
+  end
+
+  # When the key is empty, return an error response instead of making a request.
   def post(messages)
-    key = @api_key.to_s.strip
-    return { 'error' => { 'message' => 'GEMINI_API_KEY is empty — re-enter it via /providers' } } if key.empty?
+    return { 'error' => { 'message' => 'GEMINI_API_KEY is empty — re-enter it via /providers' } } if auth_token.empty?
 
-    body = JSON.generate(
-      model: @model,
-      max_tokens: [MAX_TOKENS, MAX_OUT_TOKENS].min,
-      messages: [{ role: 'system', content: active_system }] + messages,
-      tools: openai_tool_schemas,
-      tool_choice: 'auto'
-    )
-    headers = {
-      'Authorization' => "Bearer #{key}",
-      'Content-Type' => 'application/json'
-    }
-
-    res = HTTP.request(@uri, body: body, headers: headers, read_timeout: 120,
-                             log_label: 'Google POST', log_handle: @log_handle)
-    parse_response(res.body)
-  rescue StandardError => e
-    { 'error' => { 'message' => "#{e.class}: #{e.message}" } }
+    super
   end
 end

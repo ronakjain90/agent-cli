@@ -58,6 +58,11 @@ class AnthropicProvider
     @model
   end
 
+  # Anthropic's context window varies by model; default to 200k.
+  def context_window
+    200_000
+  end
+
   # Top-level user turn: run the manager agent, then signal completion.
   def run_turn(messages, events)
     agent_run(messages, events, system: Agents.system_for(0), tools: Agents.tools_for(0), depth: 0)

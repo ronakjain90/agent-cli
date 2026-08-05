@@ -100,25 +100,22 @@ class OllamaProvider < OpenaiProvider
     'ollama'
   end
 
-  private
+  # Local Ollama models vary widely; default to a typical 128k-ish window.
+  # Individual models may differ — this is a reasonable estimate for the meter.
+  def context_window
+    128_000
+  end
 
-  def post(messages)
-    body = JSON.generate(
-      model: @model,
-      max_tokens: [MAX_TOKENS, MAX_OUT_TOKENS].min,
-      messages: [{ role: 'system', content: active_system }] + messages,
-      tools: openai_tool_schemas,
-      tool_choice: 'auto'
-    )
-    headers = {
-      'Authorization' => 'Bearer ollama',
-      'Content-Type' => 'application/json'
-    }
+  def log_label
+    'Ollama POST'
+  end
 
-    res = HTTP.request(@uri, body: body, headers: headers, read_timeout: READ_TIMEOUT,
-                             log_label: 'Ollama POST', log_handle: @log_handle)
-    parse_response(res.body)
-  rescue StandardError => e
-    { 'error' => { 'message' => "#{e.class}: #{e.message}" } }
+  # Ollama uses a fixed local sentinel token and longer timeouts.
+  def auth_token
+    'ollama'
+  end
+
+  def read_timeout
+    READ_TIMEOUT
   end
 end

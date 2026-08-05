@@ -51,25 +51,41 @@ class GeminiProvider < OpenaiProvider
   ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
   MAX_OUT_TOKENS = 8192
 
-  def initialize(api_key:, model:)
+  def initialize(api_key:, model:, debug: false)
     @api_key = Settings.sanitize_api_key(api_key)
     @model   = model
     @uri     = URI(ENDPOINT)
+    @log_handle = HTTP.open_log if debug
   end
 
   def label
     'gemini'
   end
 
-  private
+  # Gemini 3.6/2.5 models have 1M token context windows.
+  def context_window
+    1_000_000
+  end
 
+  def log_label
+    'Gemini POST'
+  end
+
+  def build_headers
+    h = super
+    {
+      'Authorization' => h['authorization'],
+      'Content-Type'  => h['content-type']
+    }
+  end
+
+  # When the key is empty, return an error response instead of making a request.
   def post(messages)
-    key = @api_key.to_s.strip
-    return { 'error' => { 'message' => 'GEMINI_API_KEY is empty — re-enter it via /providers' } } if key.empty?
+    return { 'error' => { 'message' => 'GEMINI_API_KEY is empty — re-enter it via /providers' } } if auth_token.empty?
 
     req = Net::HTTP::Post.new(@uri)
-    req['Authorization'] = "Bearer #{key}"
-    req['Content-Type']  = 'application/json'
+    req['Authorization'] = build_headers['Authorization']
+    req['Content-Type']  = build_headers['Content-Type']
 
     req.body = JSON.generate(
       model: @model,
@@ -79,7 +95,7 @@ class GeminiProvider < OpenaiProvider
       tool_choice: 'auto'
     )
 
-    res = Net::HTTP.start(@uri.host, @uri.port, use_ssl: true, read_timeout: 120) do |http|
+    res = Net::HTTP.start(@uri.host, @uri.port, use_ssl: true, read_timeout: read_timeout) do |http|
       http.request(req)
     end
     parse_response(res.body)

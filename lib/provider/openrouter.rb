@@ -69,35 +69,28 @@ class OpenrouterProvider < OpenaiProvider
     'openrouter'
   end
 
+  def log_label
+    'OpenRouter POST'
+  end
+
+  def build_headers
+    super.merge(
+      'HTTP-Referer' => @site_url,
+      'X-Title' => @site_name
+    )
+  end
+
+  # When the key is empty, return an error response instead of making a request.
+  def post(messages)
+    return { 'error' => { 'message' => 'OPENROUTER_API_KEY is empty — re-enter it via /providers' } } if auth_token.empty?
+
+    super
+  end
+
   private
 
   def env_blank(name, default)
     v = ENV.fetch(name, nil)
     v.nil? || v.empty? ? default : v
-  end
-
-  def post(messages)
-    key = @api_key.to_s.strip
-    return { 'error' => { 'message' => 'OPENROUTER_API_KEY is empty — re-enter it via /providers' } } if key.empty?
-
-    body = JSON.generate(
-      model: @model,
-      max_tokens: [MAX_TOKENS, MAX_OUT_TOKENS].min,
-      messages: [{ role: 'system', content: active_system }] + messages,
-      tools: openai_tool_schemas,
-      tool_choice: 'auto'
-    )
-    headers = {
-      'Authorization' => "Bearer #{key}",
-      'Content-Type' => 'application/json',
-      'HTTP-Referer' => @site_url,
-      'X-Title' => @site_name
-    }
-
-    res = HTTP.request(@uri, body: body, headers: headers, read_timeout: 120,
-                             log_label: 'OpenRouter POST', log_handle: @log_handle)
-    parse_response(res.body)
-  rescue StandardError => e
-    { 'error' => { 'message' => "#{e.class}: #{e.message}" } }
   end
 end

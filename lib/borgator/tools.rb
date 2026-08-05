@@ -7,7 +7,6 @@ require_relative 'constants'
 require_relative 'diff'
 require_relative 'preferences'
 require_relative 'sandbox'
-require_relative 'errors'
 
 # Capabilities exposed to the model (anthropic / openai / openrouter / google / groq / ollama providers).
 module Tools
@@ -34,6 +33,14 @@ module Tools
   # Reject anything that could chain, redirect, or substitute another command;
   # such lines always require explicit approval even if they start with an allowed prefix.
   SHELL_METACHARS = /[;&|`><\n]|\$\(/
+
+  # Runner prefixes the run_tests tool considers safe to auto-run without a
+  # permission prompt. A runner passes if its first token matches one of these
+  # and the full command contains no shell metacharacters.
+  SAFE_TEST_RUNNERS = %w[
+    bin/rspec rspec bin/rails bundle rake test pytest go cargo test npm npx yarn pnpm ruby
+  ].freeze
+
   DEFINITIONS = [
     {
       name: 'read_file',
@@ -511,7 +518,14 @@ module Tools
               'AGENT_TEST_COMMAND environment variable, or add a "test_command" to the ' \
               'borgator preferences file.'
       end
-      run_command(apply_test_path(base, input['path']), skip_permission: true)
+      command = apply_test_path(base, input['path'])
+      if safe_test_runner?(command)
+        run_command(command, skip_permission: true)
+      else
+        # A model-supplied or detected runner that isn't on the allowlist should
+        # go through the normal permission prompt, not bypass it.
+        run_command(command)
+      end
     end
 
     # Pick the test command from, in order: an explicit +runner+ argument, the
@@ -530,6 +544,18 @@ module Tools
       detect_test_command
     end
 
+    # True when the resolved test command is safe to auto-run without a prompt:
+    # it must start with a known-good runner prefix and contain no shell
+    # metacharacters that could chain/redirect/substitute another command.
+    # Anything that doesn't match falls through to a normal (prompted) run_command.
+    def safe_test_runner?(command)
+      return false if command.nil? || command.strip.empty?
+      return false if command.match?(SHELL_METACHARS)
+
+      first_token = command.strip.split(/\s+/).first.to_s
+      SAFE_TEST_RUNNERS.include?(first_token)
+    end
+
     # Best-effort detection of the project's test runner from marker files in the
     # working directory. Ruby is checked first (RSpec before minitest), then the
     # common runners for other ecosystems. Returns nil when nothing is recognized.
@@ -544,8 +570,11 @@ module Tools
       return 'bin/rails test' if File.executable?('bin/rails')
       # Ruby — rake-driven minitest.
       return "#{bundle_prefix}rake test" if File.exist?('Rakefile') && File.directory?('test')
-      # Ruby — minitest with a Gemfile but no Rakefile.
-      return 'minitest' if File.exist?('Gemfile') && File.directory?('test')
+      # Ruby — minitest with a Gemfile but no Rakefile. The `minitest` gem is a
+      # library, not an executable — invoke the test files directly through ruby.
+      if File.exist?('Gemfile') && File.directory?('test')
+        return "#{bundle_prefix}ruby -Itest -e 'Dir[\"test/**/*_test.rb\"].each { |f| require_relative f }'"
+      end
       # JavaScript / TypeScript — a "test" script in package.json.
       return js_test_command if File.exist?('package.json') && package_test_script?
       # Python — pytest.

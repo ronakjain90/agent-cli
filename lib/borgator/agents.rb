@@ -19,6 +19,10 @@ module Agents
   # Context-window budget; past it, the oldest tool results are compacted away.
   MAX_CONTEXT_TOKENS = 60_000
 
+  # Cap on the size of a worker's report to the manager. A chatty worker
+  # can otherwise blow the manager's context budget.
+  WORKER_REPORT_MAX_BYTES = 8_000
+
   # Rough heuristic: ~4 characters per token.
   CHARS_PER_TOKEN = 4
 
@@ -359,6 +363,26 @@ module Delegation
     calls.each_index.map { |i| result_for(calls[i], outcomes[i]) }
   end
 
+  # Truncates a worker's report to WORKER_REPORT_MAX_BYTES on a whole-line
+  # boundary, appending a hint when the cap was hit so the manager knows the
+  # output was trimmed for context budget reasons.
+  def truncate_worker_report(report)
+    max = Agents::WORKER_REPORT_MAX_BYTES
+    return report if report.bytesize <= max
+
+    hint = "… (truncated — full output capped at #{max} bytes)"
+    cutoff = max - hint.bytesize
+    return hint if cutoff <= 0
+
+    truncated = report[0, cutoff]
+    # Trim on a whole-line boundary: cut back to the last newline so we don't
+    # leave a half-finished line fragment.
+    last_nl = truncated.rindex("\n")
+    truncated = truncated[0, last_nl] if last_nl
+
+    "#{truncated}#{hint}"
+  end
+
   private
 
   # A raised exception would otherwise surface at `join` and abort the whole
@@ -418,6 +442,7 @@ module Delegation
         "Worker failed: #{e.class}: #{e.message}"
       end
     report = '(worker finished without a written summary)' if report.empty?
+    report = truncate_worker_report(report)
     events << { kind: :worker_done, text: title, depth: child }
 
     ["delegated → #{title}", report]

@@ -61,28 +61,19 @@ class GroqProvider < OpenaiProvider
     'groq'
   end
 
-  private
+  # Groq models: most use 128k context.
+  def context_window
+    128_000
+  end
 
+  def log_label
+    'Groq POST'
+  end
+
+  # When the key is empty, return an error response instead of making a request.
   def post(messages)
-    key = @api_key.to_s.strip
-    return { 'error' => { 'message' => 'GROQ_API_KEY is empty — re-enter it via /providers' } } if key.empty?
+    return { 'error' => { 'message' => 'GROQ_API_KEY is empty — re-enter it via /providers' } } if auth_token.empty?
 
-    body = JSON.generate(
-      model: @model,
-      max_tokens: [MAX_TOKENS, MAX_OUT_TOKENS].min,
-      messages: [{ role: 'system', content: active_system }] + messages,
-      tools: openai_tool_schemas,
-      tool_choice: 'auto'
-    )
-    headers = {
-      'Authorization' => "Bearer #{key}",
-      'Content-Type' => 'application/json'
-    }
-
-    res = HTTP.request(@uri, body: body, headers: headers, read_timeout: 120,
-                             log_label: 'Groq POST', log_handle: @log_handle)
-    parse_response(res.body)
-  rescue StandardError => e
-    { 'error' => { 'message' => "#{e.class}: #{e.message}" } }
+    super
   end
 end
