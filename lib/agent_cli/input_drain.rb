@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "open3"
+require 'open3'
 
 # Bubbletea's Program#poll_event only parses the first key from each raw read and
 # discards the rest — so clipboard pastes become 1–2 characters. This patch drains
@@ -28,7 +28,7 @@ module AgentCli
     KEY_ALT_RIGHT   = -101
     KEY_CTRL_LEFT   = -102
     KEY_CTRL_RIGHT  = -103
-    KEY_ALT_BACKSPACE  = -104
+    KEY_ALT_BACKSPACE = -104
 
     module_function
 
@@ -108,26 +108,26 @@ module AgentCli
           next
         end
 
-        if b == 0x7f || b == 0x08
-          events << key_event(KEY_BACKSPACE, "backspace")
+        if [0x7f, 0x08].include?(b)
+          events << key_event(KEY_BACKSPACE, 'backspace')
           i += 1
           next
         end
 
         if b == 0x09
-          events << key_event(KEY_TAB, "tab")
+          events << key_event(KEY_TAB, 'tab')
           i += 1
           next
         end
 
-        if b == 0x0d || b == 0x0a
-          events << key_event(KEY_ENTER, "enter")
+        if [0x0d, 0x0a].include?(b)
+          events << key_event(KEY_ENTER, 'enter')
           i += 1
           next
         end
 
         if b < 32
-          name = b == 22 ? "ctrl+v" : "ctrl+#{(b + 96).chr}"
+          name = b == 22 ? 'ctrl+v' : "ctrl+#{(b + 96).chr}"
           events << key_event(b, name)
           i += 1
           next
@@ -138,22 +138,22 @@ module AgentCli
         i += 1 while i < data.bytesize && printable_byte?(data.getbyte(i))
         chunk = utf8(data.byteslice(start, i - start))
         # Orphaned bracketed-paste markers (ESC consumed separately).
-        if chunk.start_with?("[200~")
-          chunk = chunk.delete_prefix("[200~")
-          if (close = chunk.index("[201~"))
-            chunk = chunk.byteslice(0, close).to_s
-          else
-            chunk = chunk.delete_suffix("[201~")
-          end
+        if chunk.start_with?('[200~')
+          chunk = chunk.delete_prefix('[200~')
+          chunk = if (close = chunk.index('[201~'))
+                    chunk.byteslice(0, close).to_s
+                  else
+                    chunk.delete_suffix('[201~')
+                  end
         end
-        chunk = chunk.gsub(/\[201~/, "")
+        chunk = chunk.gsub('[201~', '')
         next if chunk.empty?
 
-        if chunk == " "
-          events << key_event(KEY_SPACE, "space", [0x20])
-        else
-          events << rune_event(chunk)
-        end
+        events << if chunk == ' '
+                    key_event(KEY_SPACE, 'space', [0x20])
+                  else
+                    rune_event(chunk)
+                  end
       end
 
       events
@@ -172,62 +172,60 @@ module AgentCli
       rest = data.byteslice(i..-1).to_s
 
       case rest
-      when /\A\e\[A/        then return [key_event(KEY_UP, "up"), 3]
-      when /\A\e\[B/        then return [key_event(KEY_DOWN, "down"), 3]
-      when /\A\e\[C/        then return [key_event(KEY_RIGHT, "right"), 3]
-      when /\A\e\[D/        then return [key_event(KEY_LEFT, "left"), 3]
-      when /\A\e\[H/        then return [key_event(KEY_HOME, "home"), 3]
-      when /\A\e\[F/        then return [key_event(KEY_END, "end"), 3]
-      when /\A\e\[1~/       then return [key_event(KEY_HOME, "home"), 4]
-      when /\A\e\[4~/       then return [key_event(KEY_END, "end"), 4]
-      when /\A\e\[3~/       then return [key_event(KEY_DELETE, "delete"), 4]
-      when /\A\e\[Z/        then return [key_event(-24, "shift+tab"), 3]
-      when /\A\e\[1;3C/    then return [key_event(KEY_ALT_RIGHT, "alt+right"), 6]
-      when /\A\e\[1;3D/    then return [key_event(KEY_ALT_LEFT, "alt+left"), 6]
-      when /\A\e\[1;5C/    then return [key_event(KEY_CTRL_RIGHT, "ctrl+right"), 6]
-      when /\A\e\[1;5D/    then return [key_event(KEY_CTRL_LEFT, "ctrl+left"), 6]
+      when /\A\e\[A/        then return [key_event(KEY_UP, 'up'), 3]
+      when /\A\e\[B/        then return [key_event(KEY_DOWN, 'down'), 3]
+      when /\A\e\[C/        then return [key_event(KEY_RIGHT, 'right'), 3]
+      when /\A\e\[D/        then return [key_event(KEY_LEFT, 'left'), 3]
+      when /\A\e\[H/        then return [key_event(KEY_HOME, 'home'), 3]
+      when /\A\e\[F/        then return [key_event(KEY_END, 'end'), 3]
+      when /\A\e\[1~/       then return [key_event(KEY_HOME, 'home'), 4]
+      when /\A\e\[4~/       then return [key_event(KEY_END, 'end'), 4]
+      when /\A\e\[3~/       then return [key_event(KEY_DELETE, 'delete'), 4]
+      when /\A\e\[Z/        then return [key_event(-24, 'shift+tab'), 3]
+      when /\A\e\[1;3C/    then return [key_event(KEY_ALT_RIGHT, 'alt+right'), 6]
+      when /\A\e\[1;3D/    then return [key_event(KEY_ALT_LEFT, 'alt+left'), 6]
+      when /\A\e\[1;5C/    then return [key_event(KEY_CTRL_RIGHT, 'ctrl+right'), 6]
+      when /\A\e\[1;5D/    then return [key_event(KEY_CTRL_LEFT, 'ctrl+left'), 6]
       end
 
       # macOS Terminal sends ESC b / ESC f for opt+left / opt+right (bash readline defaults).
       # opt+delete: ESC followed by 0x7f (backspace). Terminal sends this as
       # two bytes, not as an escape sequence like the arrow keys above.
-      if rest.bytesize >= 2 && rest.getbyte(1) == 0x7f
-        return [key_event(KEY_ALT_BACKSPACE, "alt+backspace"), 2]
-      end
+      return [key_event(KEY_ALT_BACKSPACE, 'alt+backspace'), 2] if rest.bytesize >= 2 && rest.getbyte(1) == 0x7f
 
       if rest.bytesize >= 2 && rest.getbyte(1).between?(32, 126)
         r = rest.getbyte(1)
         case r
         when 98  # 'b' — opt+left (backward-word)
-          return [key_event(KEY_ALT_LEFT, "alt+left"), 2]
+          return [key_event(KEY_ALT_LEFT, 'alt+left'), 2]
         when 102 # 'f' — opt+right (forward-word)
-          return [key_event(KEY_ALT_RIGHT, "alt+right"), 2]
+          return [key_event(KEY_ALT_RIGHT, 'alt+right'), 2]
         else
           return [rune_event(r.chr, alt: true), 2]
         end
       end
 
-      [key_event(KEY_ESC, "esc"), 1]
+      [key_event(KEY_ESC, 'esc'), 1]
     end
 
     def rune_event(text, alt: false)
       text = text.to_s
       {
-        "type" => "key",
-        "key_type" => KEY_RUNES,
-        "runes" => text.unpack("U*"),
-        "alt" => alt,
-        "name" => alt ? "alt+#{text}" : text
+        'type' => 'key',
+        'key_type' => KEY_RUNES,
+        'runes' => text.unpack('U*'),
+        'alt' => alt,
+        'name' => alt ? "alt+#{text}" : text
       }
     end
 
     def key_event(key_type, name, runes = nil)
       {
-        "type" => "key",
-        "key_type" => key_type,
-        "runes" => runes,
-        "alt" => false,
-        "name" => name
+        'type' => 'key',
+        'key_type' => key_type,
+        'runes' => runes,
+        'alt' => false,
+        'name' => name
       }
     end
 

@@ -62,7 +62,7 @@
 # Keys (picker): ↑/↓ move · enter select · esc back · ctrl+c quit
 # Keys (permission): y/enter allow once · a allow session · p allow permanently · n/esc deny · esc back · ctrl+c quit
 
-$LOAD_PATH.unshift File.expand_path("lib", __dir__)
-require "agent_cli"
+$LOAD_PATH.unshift File.expand_path('lib', __dir__)
+require 'agent_cli'
 
 AgentCli.start

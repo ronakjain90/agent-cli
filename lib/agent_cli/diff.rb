@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "constants"
+require_relative 'constants'
 
 # Minimal unified-diff generator for write_file changes.
 module Diff
@@ -9,7 +9,7 @@ module Diff
   def unified(path, old_text, new_text, context: 3)
     old_lines = old_text.to_s.lines.map(&:chomp)
     new_lines = new_text.to_s.lines.map(&:chomp)
-    return "" if old_lines == new_lines
+    return '' if old_lines == new_lines
 
     ses = compute_ses(old_lines, new_lines)
     format_unified(path, old_lines, new_lines, ses, context)
@@ -19,9 +19,7 @@ module Diff
     m = a.length
     n = b.length
     # Cap to keep memory reasonable for huge files.
-    if m > MAX_LCS_LINES || n > MAX_LCS_LINES
-      return coarse_ses(a, b)
-    end
+    return coarse_ses(a, b) if m > MAX_LCS_LINES || n > MAX_LCS_LINES
 
     dp = Array.new(m + 1) { Array.new(n + 1, 0) }
     (1..m).each do |i|
@@ -33,12 +31,12 @@ module Diff
     ses = []
     i = m
     j = n
-    while i > 0 || j > 0
-      if i > 0 && j > 0 && a[i - 1] == b[j - 1]
+    while i.positive? || j.positive?
+      if i.positive? && j.positive? && a[i - 1] == b[j - 1]
         ses.unshift([:eq, i - 1, j - 1])
         i -= 1
         j -= 1
-      elsif j > 0 && (i == 0 || dp[i][j - 1] >= dp[i - 1][j])
+      elsif j.positive? && (i.zero? || dp[i][j - 1] >= dp[i - 1][j])
         ses.unshift([:ins, nil, j - 1])
         j -= 1
       else
@@ -57,20 +55,18 @@ module Diff
   end
 
   def format_unified(path, old_lines, new_lines, ses, context)
-    return "" if ses.all? { |op, _, _| op == :eq }
+    return '' if ses.all? { |op, _, _| op == :eq }
 
     result = ["--- a/#{path}", "+++ b/#{path}"]
-    changed_indices = ses.each_index.select { |i| ses[i][0] != :eq }
-    return "" if changed_indices.empty?
+    changed_indices = ses.each_index.reject { |i| ses[i][0] == :eq }
+    return '' if changed_indices.empty?
 
     hunks = []
     i = 0
     while i < changed_indices.length
       hunk_start = changed_indices[i]
       j = i
-      while j + 1 < changed_indices.length && changed_indices[j + 1] - changed_indices[j] <= context * 2 + 1
-        j += 1
-      end
+      j += 1 while j + 1 < changed_indices.length && changed_indices[j + 1] - changed_indices[j] <= (context * 2) + 1
       hunk_end = changed_indices[j]
       lo = [hunk_start - context, 0].max
       hi = [hunk_end + context, ses.length - 1].min

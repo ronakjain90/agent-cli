@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
-require "json"
-require "fileutils"
+require 'json'
+require 'fileutils'
 
 # Persisted settings (API keys, etc.) under ~/.agent-cli/settings.json
 class Settings
-  PATH = File.expand_path("~/.agent-cli/settings.json")
+  PATH = File.expand_path('~/.agent-cli/settings.json')
 
   class MissingApiKeyError < StandardError
     attr_reader :env_name
@@ -33,30 +33,30 @@ class Settings
   # Strip terminal bracketed-paste markers that sometimes leak into pasted text.
   def self.sanitize_api_key(value)
     key = value.to_s
-    key = key.gsub(/\e\[200~/, "").gsub(/\e\[201~/, "")
-    key = key.gsub(/\[200~/, "").gsub(/\[201~/, "")
+    key = key.gsub("\e[200~", '').gsub("\e[201~", '')
+    key = key.gsub('[200~', '').gsub('[201~', '')
     key.strip
   end
 
   # Env var wins; otherwise read from settings.json → api_keys[ENV_NAME]
   def self.api_key(env_name)
-    from_env = ENV[env_name]
+    from_env = ENV.fetch(env_name, nil)
     unless from_env.nil? || from_env.empty?
       cleaned = sanitize_api_key(from_env)
       return cleaned unless cleaned.empty?
     end
 
-    cleaned = sanitize_api_key(load.dig("api_keys", env_name))
+    cleaned = sanitize_api_key(load.dig('api_keys', env_name))
     cleaned.empty? ? nil : cleaned
   end
 
   def self.save_api_key(env_name, value)
     key = sanitize_api_key(value)
-    raise ArgumentError, "API key cannot be empty" if key.empty?
+    raise ArgumentError, 'API key cannot be empty' if key.empty?
 
     data = load
-    data["api_keys"] ||= {}
-    data["api_keys"][env_name] = key
+    data['api_keys'] ||= {}
+    data['api_keys'][env_name] = key
     save(data)
     key
   end

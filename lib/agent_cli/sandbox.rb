@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "rbconfig"
+require 'rbconfig'
 
 # Filesystem confinement for the agent.
 #
@@ -28,14 +28,18 @@ module Sandbox
   #
   # @return [String] absolute, symlink-resolved path to the project root
   def root
-    @root ||= (File.realpath(Dir.pwd) rescue File.expand_path(Dir.pwd))
+    @root ||= begin
+      File.realpath(Dir.pwd)
+    rescue StandardError
+      File.expand_path(Dir.pwd)
+    end
   end
 
   # The host operating-system family, used to pick a sandbox backend.
   #
   # @return [Symbol] +:macos+, +:linux+, or +:other+
   def host
-    case RbConfig::CONFIG["host_os"]
+    case RbConfig::CONFIG['host_os']
     when /darwin/ then :macos
     when /linux/  then :linux
     else :other
@@ -56,15 +60,27 @@ module Sandbox
 
     probe = full
     probe = File.dirname(probe) while !File.exist?(probe) && probe != File.dirname(probe)
-    ancestor = (File.realpath(probe) rescue probe)
-    resolved = File.exist?(full) ? (File.realpath(full) rescue full) : full
+    ancestor = begin
+      File.realpath(probe)
+    rescue StandardError
+      probe
+    end
+    resolved = if File.exist?(full)
+                 begin
+                   File.realpath(full)
+                 rescue StandardError
+                   full
+                 end
+               else
+                 full
+               end
 
     unless within?(resolved) && within?(ancestor)
       raise ArgumentError,
-        "refusing to write outside the project directory.\n" \
-        "  project: #{root}\n" \
-        "  target:  #{path}\n" \
-        "Only paths inside the project directory can be modified."
+            "refusing to write outside the project directory.\n  " \
+            "project: #{root}\n  " \
+            "target:  #{path}\n" \
+            'Only paths inside the project directory can be modified.'
     end
     full
   end
@@ -91,26 +107,26 @@ module Sandbox
   def wrap(cmd)
     case host
     when :macos
-      if command_exist?("sandbox-exec")
-        [["sandbox-exec", "-p", seatbelt_profile, "/bin/sh", "-c", cmd], nil]
+      if command_exist?('sandbox-exec')
+        [['sandbox-exec', '-p', seatbelt_profile, '/bin/sh', '-c', cmd], nil]
       else
-        [nil, "Refusing to run: sandbox-exec (macOS Seatbelt) is unavailable, so shell " \
-              "commands cannot be confined to this project."]
+        [nil, 'Refusing to run: sandbox-exec (macOS Seatbelt) is unavailable, so shell ' \
+              'commands cannot be confined to this project.']
       end
     when :linux
-      if command_exist?("bwrap")
+      if command_exist?('bwrap')
         [bwrap_argv(cmd), nil]
       else
         [nil,
-          "Refusing to run: bubblewrap (bwrap) is not installed, so shell commands cannot be " \
-          "confined to this project. Install it and retry:\n" \
-          "    Debian/Ubuntu: sudo apt-get install bubblewrap\n" \
-          "    Fedora/RHEL:   sudo dnf install bubblewrap\n" \
-          "    Arch:          sudo pacman -S bubblewrap"]
+         'Refusing to run: bubblewrap (bwrap) is not installed, so shell commands cannot be ' \
+         "confined to this project. Install it and retry:\n    " \
+         "Debian/Ubuntu: sudo apt-get install bubblewrap\n    " \
+         "Fedora/RHEL:   sudo dnf install bubblewrap\n    " \
+         'Arch:          sudo pacman -S bubblewrap']
       end
     else
-      [nil, "Refusing to run: shell-command sandboxing is not supported on " \
-            "#{RbConfig::CONFIG["host_os"]}, so commands cannot be confined to this project."]
+      [nil, 'Refusing to run: shell-command sandboxing is not supported on ' \
+            "#{RbConfig::CONFIG['host_os']}, so commands cannot be confined to this project."]
     end
   end
 
@@ -119,8 +135,8 @@ module Sandbox
   #
   # @return [Boolean]
   def active?
-    (host == :macos && command_exist?("sandbox-exec")) ||
-      (host == :linux && command_exist?("bwrap"))
+    (host == :macos && command_exist?('sandbox-exec')) ||
+      (host == :linux && command_exist?('bwrap'))
   end
 
   # Build the macOS Seatbelt (SBPL) profile: allow everything, then deny all
@@ -133,9 +149,15 @@ module Sandbox
     # Allow the *specific* per-user temp dir (not the whole /private/var/folders
     # tree, which holds every app's temp and the project's own siblings when it
     # happens to live under temp). Plus the shared /tmp and /dev tools rely on.
-    tmp = ENV["TMPDIR"]
-    writable << (File.realpath(tmp) rescue tmp) if tmp && !tmp.empty?
-    writable += ["/private/tmp", "/dev"]
+    tmp = ENV.fetch('TMPDIR', nil)
+    if tmp && !tmp.empty?
+      writable << begin
+        File.realpath(tmp)
+      rescue StandardError
+        tmp
+      end
+    end
+    writable += ['/private/tmp', '/dev']
 
     allows = writable.uniq.map { |p| "  (subpath #{sbpl_quote(p)})" }.join("\n")
     <<~PROFILE
@@ -156,28 +178,28 @@ module Sandbox
   # @return [Array<String>] a +bwrap+ argv ending in +/bin/sh -c cmd+
   def bwrap_argv(cmd)
     [
-      "bwrap",
-      "--die-with-parent",
+      'bwrap',
+      '--die-with-parent',
       # Isolate namespaces but keep the network shared (fetch/install still work).
-      "--unshare-pid",
-      "--unshare-ipc",
-      "--unshare-uts",
-      "--unshare-cgroup-try",
-      "--new-session", # own session: blocks TIOCSTI keystroke injection
-      "--proc", "/proc",
-      "--dev", "/dev",
-      "--tmpfs", "/tmp",
-      "--ro-bind", "/usr", "/usr",
-      "--ro-bind-try", "/bin", "/bin",
-      "--ro-bind-try", "/sbin", "/sbin",
-      "--ro-bind-try", "/lib", "/lib",
-      "--ro-bind-try", "/lib64", "/lib64",
-      "--ro-bind-try", "/etc", "/etc",
-      "--ro-bind-try", "/opt", "/opt",
-      "--bind", root, root,
-      "--chdir", root,
-      "--setenv", "HOME", root,
-      "/bin/sh", "-c", cmd
+      '--unshare-pid',
+      '--unshare-ipc',
+      '--unshare-uts',
+      '--unshare-cgroup-try',
+      '--new-session', # own session: blocks TIOCSTI keystroke injection
+      '--proc', '/proc',
+      '--dev', '/dev',
+      '--tmpfs', '/tmp',
+      '--ro-bind', '/usr', '/usr',
+      '--ro-bind-try', '/bin', '/bin',
+      '--ro-bind-try', '/sbin', '/sbin',
+      '--ro-bind-try', '/lib', '/lib',
+      '--ro-bind-try', '/lib64', '/lib64',
+      '--ro-bind-try', '/etc', '/etc',
+      '--ro-bind-try', '/opt', '/opt',
+      '--bind', root, root,
+      '--chdir', root,
+      '--setenv', 'HOME', root,
+      '/bin/sh', '-c', cmd
     ]
   end
 
@@ -188,8 +210,9 @@ module Sandbox
   # @param name [String] executable base name (e.g. +"bwrap"+)
   # @return [Boolean]
   def command_exist?(name)
-    ENV["PATH"].to_s.split(File::PATH_SEPARATOR).any? do |dir|
+    ENV['PATH'].to_s.split(File::PATH_SEPARATOR).any? do |dir|
       next false if dir.empty?
+
       full = File.join(dir, name)
       File.executable?(full) && !File.directory?(full)
     end
@@ -200,6 +223,6 @@ module Sandbox
   # @param path [String] the path to quote
   # @return [String] the path wrapped in double quotes, safe for SBPL
   def sbpl_quote(path)
-    %("#{path.gsub("\\", "\\\\\\\\").gsub('"', '\\"')}")
+    %("#{path.gsub('\\', '\\\\\\\\').gsub('"', '\\"')}")
   end
 end

@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require "json"
+require 'json'
 
-require_relative "tools"
+require_relative 'tools'
 
 # Manager -> worker multi-agent orchestration.
 #
@@ -26,7 +26,7 @@ module Agents
   # manager that fans out many subtasks doesn't open unbounded connections.
   MAX_PARALLEL = 6
 
-  DELEGATE_TOOL_NAME = "delegate"
+  DELEGATE_TOOL_NAME = 'delegate'
 
   MANAGER_SYSTEM = <<~TXT
     You are the manager agent — an orchestrator working in the user's current directory.
@@ -72,30 +72,30 @@ module Agents
   DELEGATE_TOOL = {
     name: DELEGATE_TOOL_NAME,
     description:
-      "Hand a focused, self-contained subtask to a fresh worker agent that has its own " \
-      "file and shell tools. The worker cannot see this conversation, so include every " \
+      'Hand a focused, self-contained subtask to a fresh worker agent that has its own ' \
+      'file and shell tools. The worker cannot see this conversation, so include every ' \
       "detail it needs. Returns the worker's final report.",
     input_schema: {
-      type: "object",
+      type: 'object',
       properties: {
         title: {
-          type: "string",
-          description: "Short label for the subtask (a few words), shown in the UI."
+          type: 'string',
+          description: 'Short label for the subtask (a few words), shown in the UI.'
         },
         task: {
-          type: "string",
+          type: 'string',
           description:
-            "Complete, self-contained instructions for the worker: what to do, the " \
-            "relevant files/paths, and exactly what it should report back."
+            'Complete, self-contained instructions for the worker: what to do, the ' \
+            'relevant files/paths, and exactly what it should report back.'
         }
       },
-      required: ["task"]
+      required: ['task']
     }
   }.freeze
 
   # Project context file, loaded into the manager's system prompt at the start
   # of a session so the model knows the repo conventions up front.
-  AGENTS_FILE = "AGENTS.md"
+  AGENTS_FILE = 'AGENTS.md'
 
   module_function
 
@@ -115,18 +115,18 @@ module Agents
   end
 
   def step_limit_event(depth)
-    who = depth.zero? ? "turn" : "worker"
+    who = depth.zero? ? 'turn' : 'worker'
     {
       kind: :error,
       depth: depth,
       text: "step limit reached — this #{who} used all #{MAX_STEPS} tool-loop steps and stopped " \
-            "before answering. Send a follow-up (e.g. \"continue\") to keep going."
+            'before answering. Send a follow-up (e.g. "continue") to keep going.'
     }
   end
 
-  COMPACTED_PLACEHOLDER = "[earlier tool result omitted — re-run the tool for full output]"
+  COMPACTED_PLACEHOLDER = '[earlier tool result omitted — re-run the tool for full output]'
 
-  SUPERSEDED_PLACEHOLDER = "[superseded — the same call was made again later; see the newer result]"
+  SUPERSEDED_PLACEHOLDER = '[superseded — the same call was made again later; see the newer result]'
 
   # Snapshots of on-disk state, where a later call supersedes an earlier one.
   # Excludes run_command / run_tests: a run before a fix and one after it are
@@ -139,32 +139,32 @@ module Agents
 
   # Handles string content and OpenAI ("text") / Anthropic ("content") parts.
   def message_chars(msg)
-    content = msg["content"]
+    content = msg['content']
     return 0 unless content
     return content.length unless content.is_a?(Array)
 
     content.sum do |part|
       next part.to_s.length unless part.is_a?(Hash)
 
-      (part["text"] || part["content"] || part).to_s.length
+      (part['text'] || part['content'] || part).to_s.length
     end
   end
 
   # Either wire format: OpenAI's "tool" role, or Anthropic's tool_result parts.
   def tool_result?(msg)
-    return true if msg["role"] == "tool"
-    return false unless msg["role"] == "user" && msg["content"].is_a?(Array)
+    return true if msg['role'] == 'tool'
+    return false unless msg['role'] == 'user' && msg['content'].is_a?(Array)
 
-    msg["content"].any? { |part| part.is_a?(Hash) && part["type"] == "tool_result" }
+    msg['content'].any? { |part| part.is_a?(Hash) && part['type'] == 'tool_result' }
   end
 
   def compacted_message(msg)
-    return msg.merge("content" => COMPACTED_PLACEHOLDER) if msg["role"] == "tool"
+    return msg.merge('content' => COMPACTED_PLACEHOLDER) if msg['role'] == 'tool'
 
-    msg.merge("content" => msg["content"].map do |part|
-      next part unless part.is_a?(Hash) && part["type"] == "tool_result"
+    msg.merge('content' => msg['content'].map do |part|
+      next part unless part.is_a?(Hash) && part['type'] == 'tool_result'
 
-      part.merge("content" => COMPACTED_PLACEHOLDER)
+      part.merge('content' => COMPACTED_PLACEHOLDER)
     end)
   end
 
@@ -181,22 +181,22 @@ module Agents
   # tool_call_id => signature, for idempotent read tools only.
   def read_call_signatures(messages)
     messages.each_with_object({}) do |msg, sigs|
-      next unless msg["role"] == "assistant"
+      next unless msg['role'] == 'assistant'
 
-      Array(msg["tool_calls"]).each do |tc|
-        fn = tc["function"] || {}
-        next unless IDEMPOTENT_READ_TOOLS.include?(fn["name"])
+      Array(msg['tool_calls']).each do |tc|
+        fn = tc['function'] || {}
+        next unless IDEMPOTENT_READ_TOOLS.include?(fn['name'])
 
-        sigs[tc["id"]] = call_signature(fn["name"], fn["arguments"])
+        sigs[tc['id']] = call_signature(fn['name'], fn['arguments'])
       end
 
-      next unless msg["content"].is_a?(Array)
+      next unless msg['content'].is_a?(Array)
 
-      msg["content"].each do |block|
-        next unless block.is_a?(Hash) && block["type"] == "tool_use"
-        next unless IDEMPOTENT_READ_TOOLS.include?(block["name"])
+      msg['content'].each do |block|
+        next unless block.is_a?(Hash) && block['type'] == 'tool_use'
+        next unless IDEMPOTENT_READ_TOOLS.include?(block['name'])
 
-        sigs[block["id"]] = call_signature(block["name"], block["input"])
+        sigs[block['id']] = call_signature(block['name'], block['input'])
       end
     end
   end
@@ -226,32 +226,32 @@ module Agents
   end
 
   def superseded_message(msg, sigs, seen)
-    if msg["role"] == "tool"
-      sig = sigs[msg["tool_call_id"]]
+    if msg['role'] == 'tool'
+      sig = sigs[msg['tool_call_id']]
       return msg unless sig
-      return msg.merge("content" => SUPERSEDED_PLACEHOLDER) if seen[sig]
+      return msg.merge('content' => SUPERSEDED_PLACEHOLDER) if seen[sig]
 
       seen[sig] = true
       return msg
     end
 
     changed = false
-    parts = msg["content"].map do |part|
-      next part unless part.is_a?(Hash) && part["type"] == "tool_result"
+    parts = msg['content'].map do |part|
+      next part unless part.is_a?(Hash) && part['type'] == 'tool_result'
 
-      sig = sigs[part["tool_use_id"]]
+      sig = sigs[part['tool_use_id']]
       next part unless sig
 
       if seen[sig]
         changed = true
-        part.merge("content" => SUPERSEDED_PLACEHOLDER)
+        part.merge('content' => SUPERSEDED_PLACEHOLDER)
       else
         seen[sig] = true
         part
       end
     end
 
-    changed ? msg.merge("content" => parts) : msg
+    changed ? msg.merge('content' => parts) : msg
   end
 
   # Trims oldest tool results in place — the caller's array is the live
@@ -326,8 +326,8 @@ module Delegation
       return [
         "#{call[:name]}: invalid arguments",
         "Error: could not parse the JSON arguments for #{call[:name]} (#{err}). " \
-        "Re-issue the call with valid JSON — make sure every string is properly " \
-        "escaped (quotes, newlines, backslashes)."
+        'Re-issue the call with valid JSON — make sure every string is properly ' \
+        'escaped (quotes, newlines, backslashes).'
       ]
     end
     dispatch_tool(call[:name], call[:input], events, depth)
@@ -365,13 +365,14 @@ module Delegation
   # batch, losing the other calls' results.
   def run_call_safely(call, events, depth)
     run_call(call, events, depth)
-  rescue => e
+  rescue StandardError => e
     ["error in #{call[:name]}: #{e.message}", "Error: #{e.class}: #{e.message}"]
   end
 
   # UI text announcing a tool call. Parse-failed calls have no usable input.
   def announce_text(call)
     return "#{call[:name]} (unparseable arguments)" if call[:parse_error]
+
     "#{call[:name]} #{JSON.generate(call[:input])}"
   end
 
@@ -384,28 +385,26 @@ module Delegation
 
   def result_for(call, outcome)
     _summary, result, _diff = outcome
-    result = "Error: tool call did not complete." if outcome.nil?
+    result = 'Error: tool call did not complete.' if outcome.nil?
     { id: call[:id], result: result.to_s }
   end
 
   # Spawn a worker agent for one subtask and return its report to the manager.
   def run_worker(input, events, depth)
     child = depth + 1
-    task  = input["task"].to_s.strip
-    title = input["title"].to_s.strip
+    task  = input['task'].to_s.strip
+    title = input['title'].to_s.strip
     title = task.split("\n").first.to_s[0, 60] if title.empty?
 
-    if task.empty?
-      return ["delegate: missing task", "Error: delegate requires a 'task' description."]
-    end
+    return ['delegate: missing task', "Error: delegate requires a 'task' description."] if task.empty?
     if depth >= Agents::MAX_DEPTH
       return ["delegate refused (depth #{depth})",
-              "Delegation depth limit reached — complete this subtask yourself."]
+              'Delegation depth limit reached — complete this subtask yourself.']
     end
 
     runner = worker_runner
     events << { kind: :worker_start, text: title, depth: child }
-    messages = [{ "role" => "user", "content" => task }]
+    messages = [{ 'role' => 'user', 'content' => task }]
     report =
       begin
         runner.agent_run(
@@ -414,11 +413,11 @@ module Delegation
           tools: Agents.tools_for(child),
           depth: child
         ).to_s.strip
-      rescue => e
+      rescue StandardError => e
         events << { kind: :error, text: "worker failed: #{e.class}: #{e.message}", depth: child }
         "Worker failed: #{e.class}: #{e.message}"
       end
-    report = "(worker finished without a written summary)" if report.empty?
+    report = '(worker finished without a written summary)' if report.empty?
     events << { kind: :worker_done, text: title, depth: child }
 
     ["delegated → #{title}", report]

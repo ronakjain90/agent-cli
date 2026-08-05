@@ -1,33 +1,33 @@
 # frozen_string_literal: true
 
-require "json"
-require "net/http"
-require "uri"
+require 'json'
+require 'net/http'
+require 'uri'
 
-require_relative "../agent_cli/constants"
-require_relative "../agent_cli/tools"
-require_relative "../agent_cli/agents"
-require_relative "../agent_cli/usage"
-require_relative "base"
+require_relative '../agent_cli/constants'
+require_relative '../agent_cli/tools'
+require_relative '../agent_cli/agents'
+require_relative '../agent_cli/usage'
+require_relative 'base'
 
 class Provider
   class Anthropic < Provider
     MODELS = [
-      { id: "claude-opus-4-8", label: "Claude Opus 4.8   — most capable, best for agentic coding" },
-      { id: "claude-sonnet-5", label: "Claude Sonnet 5   — near-Opus quality, faster and cheaper" },
-      { id: "claude-haiku-4-5", label: "Claude Haiku 4.5  — fastest and most cost-effective" },
-      { id: "claude-fable-5",  label: "Claude Fable 5    — frontier reasoning / long-horizon work" },
-      { id: "claude-opus-4-7", label: "Claude Opus 4.7   — previous-generation Opus" }
+      { id: 'claude-opus-4-8', label: 'Claude Opus 4.8   — most capable, best for agentic coding' },
+      { id: 'claude-sonnet-5', label: 'Claude Sonnet 5   — near-Opus quality, faster and cheaper' },
+      { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5  — fastest and most cost-effective' },
+      { id: 'claude-fable-5',  label: 'Claude Fable 5    — frontier reasoning / long-horizon work' },
+      { id: 'claude-opus-4-7', label: 'Claude Opus 4.7   — previous-generation Opus' }
     ].freeze
-    DEFAULT_MODEL = "claude-opus-4-8"
+    DEFAULT_MODEL = 'claude-opus-4-8'
 
     def self.id = :anthropic
-    def self.label = "anthropic"
-    def self.description = "Claude via Anthropic API (needs ANTHROPIC_API_KEY)"
-    def self.model_picker_title = "Select Claude model:"
+    def self.label = 'anthropic'
+    def self.description = 'Claude via Anthropic API (needs ANTHROPIC_API_KEY)'
+    def self.model_picker_title = 'Select Claude model:'
 
     def api_key_env
-      "ANTHROPIC_API_KEY"
+      'ANTHROPIC_API_KEY'
     end
 
     def build(model_id)
@@ -46,12 +46,12 @@ class AnthropicProvider
   def initialize(api_key:, model:, debug: false)
     @api_key = api_key
     @model   = model
-    @uri     = URI("https://api.anthropic.com/v1/messages")
+    @uri     = URI('https://api.anthropic.com/v1/messages')
     @log_handle = HTTP.open_log if debug
   end
 
   def label
-    "anthropic"
+    'anthropic'
   end
 
   def model_label
@@ -75,45 +75,45 @@ class AnthropicProvider
       steps_left -= 1
       resp = post(messages, system, tools)
 
-      if resp["type"] == "error"
-        events << { kind: :error, text: resp.dig("error", "message") || resp.inspect, depth: depth }
+      if resp['type'] == 'error'
+        events << { kind: :error, text: resp.dig('error', 'message') || resp.inspect, depth: depth }
         break
       end
 
-      if (usage = Usage.from_anthropic(resp["usage"]))
+      if (usage = Usage.from_anthropic(resp['usage']))
         events << { kind: :usage, usage: usage }
       end
 
       tool_uses = []
-      Array(resp["content"]).each do |block|
-        case block["type"]
-        when "text"
-          final_text = block["text"]
-          events << { kind: :assistant, text: block["text"], depth: depth }
-        when "tool_use"
+      Array(resp['content']).each do |block|
+        case block['type']
+        when 'text'
+          final_text = block['text']
+          events << { kind: :assistant, text: block['text'], depth: depth }
+        when 'tool_use'
           tool_uses << block
         end
       end
 
       # Keep the text, drop the tool_use blocks: recording them without matching
       # tool_results is rejected on every later request too.
-      if resp["stop_reason"] == "tool_use" && steps_left.zero?
-        text_only = Array(resp["content"]).reject { |block| block["type"] == "tool_use" }
-        messages << { "role" => "assistant", "content" => text_only } if text_only.any?
+      if resp['stop_reason'] == 'tool_use' && steps_left.zero?
+        text_only = Array(resp['content']).reject { |block| block['type'] == 'tool_use' }
+        messages << { 'role' => 'assistant', 'content' => text_only } if text_only.any?
         events << Agents.step_limit_event(depth)
         break
       end
 
-      messages << { "role" => "assistant", "content" => resp["content"] }
+      messages << { 'role' => 'assistant', 'content' => resp['content'] }
 
-      break if resp["stop_reason"] != "tool_use"
+      break if resp['stop_reason'] != 'tool_use'
 
-      calls = tool_uses.map { |tu| { id: tu["id"], name: tu["name"], input: tu["input"] } }
+      calls = tool_uses.map { |tu| { id: tu['id'], name: tu['name'], input: tu['input'] } }
       results = run_tool_batch(calls, events, depth).map do |r|
-        { "type" => "tool_result", "tool_use_id" => r[:id], "content" => r[:result] }
+        { 'type' => 'tool_result', 'tool_use_id' => r[:id], 'content' => r[:result] }
       end
 
-      messages << { "role" => "user", "content" => results }
+      messages << { 'role' => 'user', 'content' => results }
       messages = Agents.trim_messages(messages)
     end
 
@@ -131,15 +131,15 @@ class AnthropicProvider
       messages: messages
     )
     headers = {
-      "x-api-key" => @api_key,
-      "anthropic-version" => "2023-06-01",
-      "content-type" => "application/json"
+      'x-api-key' => @api_key,
+      'anthropic-version' => '2023-06-01',
+      'content-type' => 'application/json'
     }
 
     res = HTTP.request(@uri, body: body, headers: headers, read_timeout: 120,
-                            log_label: "Anthropic POST", log_handle: @log_handle)
+                             log_label: 'Anthropic POST', log_handle: @log_handle)
     JSON.parse(res.body)
-  rescue => e
-    { "type" => "error", "error" => { "message" => "#{e.class}: #{e.message}" } }
+  rescue StandardError => e
+    { 'type' => 'error', 'error' => { 'message' => "#{e.class}: #{e.message}" } }
   end
 end

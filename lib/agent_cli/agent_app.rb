@@ -1,16 +1,16 @@
 # frozen_string_literal: true
 
-require "bubbletea"
-require "lipgloss"
+require 'bubbletea'
+require 'lipgloss'
 
-require_relative "model"
-require_relative "preferences"
-require_relative "prompt_history"
-require_relative "settings"
-require_relative "usage"
-require_relative "commands"
-require_relative "constants"
-require_relative "agents_guard"
+require_relative 'model'
+require_relative 'preferences'
+require_relative 'prompt_history'
+require_relative 'settings'
+require_relative 'usage'
+require_relative 'commands'
+require_relative 'constants'
+require_relative 'agents_guard'
 
 class Poll < Bubbletea::Message; end
 
@@ -26,6 +26,7 @@ end
 # Elm-architecture TUI: init / update / view.
 class AgentApp
   include Bubbletea::Model
+  include Commands::Worker
 
   SPINNER = %w[⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏].freeze
 
@@ -35,7 +36,7 @@ class AgentApp
     @startup_error = startup_error
     @messages = []
     @log      = []
-    @input    = ""
+    @input    = ''
     @thinking = false
     @frame    = 0
     @events   = Queue.new
@@ -52,50 +53,51 @@ class AgentApp
     @picker_error = nil
     @models_error = nil
     @models_loading = false
-    @manual_input = ""
+    @manual_input = ''
     @manual_error = nil
-    @api_key_input = ""
+    @api_key_input = ''
     @api_key_error = nil
     @picker_from_chat = false
     @pending_model_id = nil
     @models_picker_items = []
+    @worker_picker_items = []
     @suggest_cursor = 0
     @history = PromptHistory.load
     @history_index = nil
-    @history_draft = ""
+    @history_draft = ''
 
     @cursor_pos = 0
     @usage = Usage.blank
     @context_tokens = 0
     @pending_permission = nil
 
-    @you    = Lipgloss::Style.new.bold(true).foreground("#7D56F4")
+    @you    = Lipgloss::Style.new.bold(true).foreground('#7D56F4')
     @bot    = Lipgloss::Style.new
-    @tool   = Lipgloss::Style.new.foreground("#2DA44E")
-    @toolok = Lipgloss::Style.new.foreground("#656D76")
-    @worker = Lipgloss::Style.new.foreground("#D29922").bold(true)
-    @err    = Lipgloss::Style.new.foreground("#CF222E").bold(true)
-    @warn   = Lipgloss::Style.new.foreground("#9A6700").bold(true)
-    @prompt = Lipgloss::Style.new.foreground("#FAFAFA").background("#7D56F4").padding(0, 1)
-    @hint   = Lipgloss::Style.new.foreground("#656D76")
+    @tool   = Lipgloss::Style.new.foreground('#2DA44E')
+    @toolok = Lipgloss::Style.new.foreground('#656D76')
+    @worker = Lipgloss::Style.new.foreground('#D29922').bold(true)
+    @err    = Lipgloss::Style.new.foreground('#CF222E').bold(true)
+    @warn   = Lipgloss::Style.new.foreground('#9A6700').bold(true)
+    @prompt = Lipgloss::Style.new.foreground('#FAFAFA').background('#7D56F4').padding(0, 1)
+    @hint   = Lipgloss::Style.new.foreground('#656D76')
     @cur    = Lipgloss::Style.new.reverse(true)
     # OpenCode-style composer
-    @composer_bg     = "#EDEDED"
-    @composer_fg     = Lipgloss::Style.new.foreground("#1F2328").background(@composer_bg)
-    @composer_accent = Lipgloss::Style.new.foreground("#7D56F4").background(@composer_bg)
-    @composer_dim    = Lipgloss::Style.new.foreground("#8B949E")
-    @composer_dim_bg = Lipgloss::Style.new.foreground("#8B949E").background(@composer_bg)
-    @composer_key    = Lipgloss::Style.new.foreground("#1F2328").bold(true)
+    @composer_bg     = '#EDEDED'
+    @composer_fg     = Lipgloss::Style.new.foreground('#1F2328').background(@composer_bg)
+    @composer_accent = Lipgloss::Style.new.foreground('#7D56F4').background(@composer_bg)
+    @composer_dim    = Lipgloss::Style.new.foreground('#8B949E')
+    @composer_dim_bg = Lipgloss::Style.new.foreground('#8B949E').background(@composer_bg)
+    @composer_key    = Lipgloss::Style.new.foreground('#1F2328').bold(true)
     @composer_box    = Lipgloss::Style.new
-      .background(@composer_bg)
-      .foreground("#1F2328")
-      .padding(0, 1)
-      .border_left(true)
-      .border_top(false)
-      .border_bottom(false)
-      .border_right(false)
-      .border_foreground("#7D56F4")
-      .border_style(Lipgloss::NORMAL_BORDER)
+                                      .background(@composer_bg)
+                                      .foreground('#1F2328')
+                                      .padding(0, 1)
+                                      .border_left(true)
+                                      .border_top(false)
+                                      .border_bottom(false)
+                                      .border_right(false)
+                                      .border_foreground('#7D56F4')
+                                      .border_style(Lipgloss::NORMAL_BORDER)
 
     # Worker thread blocks here until the TUI answers a permission prompt.
     Tools.approver = method(:ask_tool_permission)
@@ -104,12 +106,12 @@ class AgentApp
   def init
     if @startup_error
       @log << { kind: :error, text: @startup_error }
-      @log << { kind: :assistant, text: "Type /providers to choose a provider and model." }
+      @log << { kind: :assistant, text: 'Type /providers to choose a provider and model.' }
     elsif @provider
       @log << ready_message
-      @log << { kind: :assistant, text: "Ask me to read, write, or run something. Type /providers to switch." }
+      @log << { kind: :assistant, text: 'Ask me to read, write, or run something. Type /providers to switch.' }
     else
-      @log << { kind: :assistant, text: "Type /providers to choose a provider and model." }
+      @log << { kind: :assistant, text: 'Type /providers to choose a provider and model.' }
     end
     [self, nil]
   end
@@ -139,15 +141,11 @@ class AgentApp
 
     when Poll
       drain_events
-      if @thinking || @models_loading || @mode == :permission
-        @frame = (@frame + 1) % SPINNER.length
-        [self, tick]
-      else
-        [self, tick]
-      end
+      @frame = (@frame + 1) % SPINNER.length if @thinking || @models_loading || @mode == :permission
+      [self, tick]
 
     when Bubbletea::KeyMessage
-      return [self, Bubbletea.quit] if message.to_s == "ctrl+c"
+      return [self, Bubbletea.quit] if message.to_s == 'ctrl+c'
 
       case @mode
       when :pick_provider, :pick_model then update_picker(message)
@@ -155,6 +153,7 @@ class AgentApp
       when :enter_api_key then update_api_key_entry(message)
       when :permission then update_permission(message)
       when :models_picker then update_models_picker(message)
+      when :worker_picker then update_worker_picker(message)
       else update_chat(message)
       end
     else
@@ -169,6 +168,7 @@ class AgentApp
     when :enter_api_key then view_api_key_entry
     when :permission then view_permission
     when :models_picker then view_models_picker
+    when :worker_picker then view_worker_picker
     else view_chat
     end
   end
@@ -182,7 +182,7 @@ class AgentApp
 
   def open_providers_picker
     @picker_from_chat = true
-    @input = ""
+    @input = ''
     @cursor_pos = 0
     @suggest_cursor = 0
     prefs = Preferences.load
@@ -197,199 +197,153 @@ class AgentApp
     end
   end
 
-  # Apply the configured worker provider/model from preferences without
-  # showing a picker. If no worker is configured, inform the user.
-  def apply_worker_from_preferences
-    unless @provider
-      @log << { kind: :error, text: "connect a provider first — type /providers" }
-      return [self, nil]
-    end
-
-    prefs = Preferences.load
-    unless prefs && prefs[:worker_model]
-      @log << { kind: :assistant, text: "no worker model configured — type /providers to set one" }
-      return [self, nil]
-    end
-
-    worker_provider_id = prefs[:worker_provider] || prefs[:provider]
-    worker_provider = Provider.find(worker_provider_id)
-    unless worker_provider
-      @log << { kind: :error, text: "configured worker provider #{worker_provider_id.inspect} not found" }
-      return [self, nil]
-    end
-
-    worker = worker_provider.build(prefs[:worker_model])
-    unless worker.respond_to?(:agent_run)
-      @log << { kind: :error, text: "#{worker_provider.label} can't run worker agents" }
-      return [self, nil]
-    end
-
-    if worker.label == @provider.label && worker.model_label == @provider.model_label
-      @provider.worker_provider = nil
-      Preferences.clear_worker
-      note = "Workers will use the manager model (#{@provider.model_label})."
-    else
-      @provider.worker_provider = worker
-      Preferences.save_worker(worker_provider_id, prefs[:worker_model])
-      same_prov = worker_provider.id == Provider.find(prefs[:provider])&.id
-      note = if same_prov
-               "Workers will use #{worker_provider.label} · #{worker.model_label}."
-             else
-               "Workers will use #{worker_provider.label} · #{worker.model_label} (#{worker_provider.label})."
-             end
-    end
-
-    @log << { kind: :assistant, text: note }
-    [self, nil]
-  rescue Settings::MissingApiKeyError => e
-    @log << { kind: :error, text: "worker model needs an API key — #{e.message}" }
-    [self, nil]
-  rescue => e
-    @log << { kind: :error, text: "failed to apply worker model: #{e.message}" }
+  def open_models_picker
+    @models_picker_items = Preferences.saved_models
+    @mode = :models_picker
+    @menu_cursor = 0
+    @menu_scroll = 0
     [self, nil]
   end
 
-def open_models_picker
-  @models_picker_items = Preferences.saved_models
-  @mode = :models_picker
-  @menu_cursor = 0
-  @menu_scroll = 0
-  [self, nil]
-end
+  def update_models_picker(message)
+    update_list_picker(message, @models_picker_items) { confirm_model_set }
+  end
 
-def update_models_picker(message)
-  if message.esc?
+  # Key handling shared by the flat list pickers (/models, /worker): the caller
+  # owns the items array and what enter does.
+  def update_list_picker(message, items)
+    if message.esc?
+      @mode = :chat
+      items.clear
+      [self, nil]
+    elsif message.up? || message.to_s == 'k'
+      move_list_cursor(-1, items)
+    elsif message.down? || message.to_s == 'j'
+      move_list_cursor(1, items)
+    elsif message.enter?
+      yield
+    else
+      [self, nil]
+    end
+  end
+
+  def move_list_cursor(delta, items)
+    @menu_cursor = (@menu_cursor + delta) % [items.length, 1].max
+    ensure_list_scroll(items)
+    [self, nil]
+  end
+
+  def ensure_list_scroll(items)
+    budget = list_menu_budget
+    return if items.empty?
+
+    if @menu_cursor < @menu_scroll
+      @menu_scroll = @menu_cursor
+    elsif @menu_cursor >= @menu_scroll + budget
+      @menu_scroll = @menu_cursor - budget + 1
+    end
+    max_scroll = [items.length - budget, 0].max
+    @menu_scroll = @menu_scroll.clamp(0, max_scroll)
+  end
+
+  def list_menu_budget
+    [@height - 4, 3].max
+  end
+
+  def confirm_model_set
+    item = @models_picker_items[@menu_cursor]
+    return [self, nil] unless item
+
+    Preferences.apply_model_set(item)
+
+    # Rebuild the provider from the applied settings
+    @provider = nil
+    prefs = Preferences.load
+    if prefs && (meta = Provider.find(prefs[:provider]))
+      begin
+        @provider = meta.build(prefs[:model])
+        Provider.attach_worker(@provider, prefs[:provider])
+        @messages = []
+        @usage = Usage.blank
+        @context_tokens = 0
+      rescue Settings::MissingApiKeyError
+        @mode = :enter_api_key
+        @api_key_input = ''
+        @api_key_error = nil
+        [self, nil]
+      rescue StandardError => e
+        @picker_error = e.message
+        [self, nil]
+      end
+    end
+
     @mode = :chat
     @models_picker_items = []
-    [self, nil]
-  elsif message.up? || message.to_s == "k"
-    @menu_cursor = (@menu_cursor - 1) % [@models_picker_items.length, 1].max
-    ensure_models_scroll
-    [self, nil]
-  elsif message.down? || message.to_s == "j"
-    @menu_cursor = (@menu_cursor + 1) % [@models_picker_items.length, 1].max
-    ensure_models_scroll
-    [self, nil]
-  elsif message.enter?
-    confirm_model_set
-  else
+    @log << ready_message
     [self, nil]
   end
-end
 
-def ensure_models_scroll
-  budget = models_menu_budget
-  return if @models_picker_items.empty?
+  def view_models_picker
+    lines = [@bot.render('Saved Model Sets')]
 
-  if @menu_cursor < @menu_scroll
-    @menu_scroll = @menu_cursor
-  elsif @menu_cursor >= @menu_scroll + budget
-    @menu_scroll = @menu_cursor - budget + 1
-  end
-  max_scroll = [@models_picker_items.length - budget, 0].max
-  @menu_scroll = [[@menu_scroll, 0].max, max_scroll].min
-end
-
-def models_menu_budget
-  [@height - 4, 3].max
-end
-
-def confirm_model_set
-  item = @models_picker_items[@menu_cursor]
-  return [self, nil] unless item
-
-  Preferences.apply_model_set(item)
-
-  # Rebuild the provider from the applied settings
-  @provider = nil
-  prefs = Preferences.load
-  if prefs && (meta = Provider.find(prefs[:provider]))
-    begin
-      @provider = meta.build(prefs[:model])
-      Provider.attach_worker(@provider, prefs[:provider])
-      @messages = []
-      @usage = Usage.blank
-      @context_tokens = 0
-    rescue Settings::MissingApiKeyError => e
-      @mode = :enter_api_key
-      @api_key_input = ""
-      @api_key_error = nil
-      [self, nil]
-    rescue => e
-      @picker_error = e.message
-      [self, nil]
-    end
-  end
-
-  @mode = :chat
-  @models_picker_items = []
-  @log << ready_message
-  [self, nil]
-end
-
-def view_models_picker
-  lines = [@bot.render("Saved Model Sets")]
-
-  if @models_picker_items.empty?
-    lines << @hint.render("  no saved models  -  configure one with /providers")
-    lines << ""
-    lines << @hint.render("  esc back to chat | ctrl+c quit")
-    return lines.join("\n")
-  end
-
-  budget = models_menu_budget
-  visible = @models_picker_items[@menu_scroll, budget] || []
-
-  # Align the name column to the widest visible name (capped) so the
-  # labeled model details line up.
-  name_width = visible.map { |e| e["name"].to_s.length }.max.to_i
-  name_width = [[name_width, 24].min, 6].max
-
-  visible.each_with_index do |entry, i|
-    idx = @menu_scroll + i
-    selected = idx == @menu_cursor
-    prefix = selected ? "> " : "  "
-
-    mgr_provider = entry["provider"]
-    mgr_model = entry["model"]
-    wk_provider = entry["worker_provider"]
-    wk_model = entry["worker_model"]
-
-    manager_text = "#{mgr_provider}:#{mgr_model}"
-    worker_text = "#{wk_provider || mgr_provider}:#{wk_model}"
-
-    name = entry["name"].to_s.ljust(name_width)
-    text = "#{name}  mgr #{manager_text}"
-    # Only show the worker column when it actually differs from the manager.
-    if wk_model && !wk_model.to_s.empty? && worker_text != manager_text
-      text << " · wkr #{worker_text}"
+    if @models_picker_items.empty?
+      lines << @hint.render('  no saved models  -  configure one with /providers')
+      lines << ''
+      lines << @hint.render('  esc back to chat | ctrl+c quit')
+      return lines.join("\n")
     end
 
-    lines << (selected ? @you.render("#{prefix}#{text}") : @hint.render("#{prefix}#{text}"))
+    budget = list_menu_budget
+    visible = @models_picker_items[@menu_scroll, budget] || []
+
+    # Align the name column to the widest visible name (capped) so the
+    # labeled model details line up.
+    name_width = visible.map { |e| e['name'].to_s.length }.max.to_i
+    name_width = name_width.clamp(6, 24)
+
+    visible.each_with_index do |entry, i|
+      idx = @menu_scroll + i
+      selected = idx == @menu_cursor
+      prefix = selected ? '> ' : '  '
+
+      mgr_provider = entry['provider']
+      mgr_model = entry['model']
+      wk_provider = entry['worker_provider']
+      wk_model = entry['worker_model']
+
+      manager_text = "#{mgr_provider}:#{mgr_model}"
+      worker_text = "#{wk_provider || mgr_provider}:#{wk_model}"
+
+      name = entry['name'].to_s.ljust(name_width)
+      text = "#{name}  mgr #{manager_text}"
+      # Only show the worker column when it actually differs from the manager.
+      text << " · wkr #{worker_text}" if wk_model && !wk_model.to_s.empty? && worker_text != manager_text
+
+      lines << (selected ? @you.render("#{prefix}#{text}") : @hint.render("#{prefix}#{text}"))
+    end
+
+    lines << ''
+    lines << @hint.render('up/down move | enter apply | esc back | ctrl+c quit')
+    lines.join("\n")
   end
 
-  lines << ""
-  lines << @hint.render("up/down move | enter apply | esc back | ctrl+c quit")
-  lines.join("\n")
-end
+  def offer_save_model_set
+    return unless @provider
+    return unless @picker_from_chat == false
 
-def offer_save_model_set
-  return unless @provider
-  return unless @picker_from_chat == false
+    prefs = Preferences.load
+    return unless prefs
 
-  prefs = Preferences.load
-  return unless prefs
-
-  existing = Preferences.save_model_set(
-    nil, prefs[:provider], prefs[:model],
-    worker_provider: prefs[:worker_provider],
-    worker_model: prefs[:worker_model]
-  )
-  @log << { kind: :tool_result, text: "  saved as model set \"#{existing['name']}\"" }
-end
+    existing = Preferences.save_model_set(
+      nil, prefs[:provider], prefs[:model],
+      worker_provider: prefs[:worker_provider],
+      worker_model: prefs[:worker_model]
+    )
+    @log << { kind: :tool_result, text: "  saved as model set \"#{existing['name']}\"" }
+  end
 
   def show_command_help
-    @log << { kind: :assistant, text: "Available commands:" }
+    @log << { kind: :assistant, text: 'Available commands:' }
     Commands::ALL.each do |cmd|
       @log << { kind: :tool_result, text: "  #{cmd[:name]}  —  #{cmd[:desc]}" }
     end
@@ -397,25 +351,25 @@ end
   end
 
   def handle_init
-    agents_path = "AGENTS.md"
-    claude_path = "CLAUDE.md"
+    agents_path = 'AGENTS.md'
+    claude_path = 'CLAUDE.md'
 
     if File.exist?(agents_path)
       content = File.read(agents_path)
-      @log << { kind: :assistant, text: "AGENTS.md already exists:" }
+      @log << { kind: :assistant, text: 'AGENTS.md already exists:' }
       @log << { kind: :tool_result, text: content }
       return [self, nil]
     end
 
     # If CLAUDE.md exists, reference it but also add a project summary
-    if File.exist?(claude_path)
-      @log << { kind: :assistant, text: "Found CLAUDE.md — generating project summary for AGENTS.md…" }
-    else
-      @log << { kind: :assistant, text: "Analyzing project to generate AGENTS.md…" }
-    end
+    @log << if File.exist?(claude_path)
+              { kind: :assistant, text: 'Found CLAUDE.md — generating project summary for AGENTS.md…' }
+            else
+              { kind: :assistant, text: 'Analyzing project to generate AGENTS.md…' }
+            end
 
     @thinking = true
-    @input = ""
+    @input = ''
     @cursor_pos = 0
 
     # Build a prompt asking the LLM to summarize the project
@@ -430,7 +384,7 @@ end
       Output ONLY the AGENTS.md content in Markdown format. Do not include explanations.
     PROMPT
 
-    @messages << { "role" => "user", "content" => summary_prompt }
+    @messages << { 'role' => 'user', 'content' => summary_prompt }
     @log << { kind: :user, text: summary_prompt }
 
     @worker_thread = Thread.new(@messages.dup, @events) do |msgs, events|
@@ -445,30 +399,38 @@ end
   end
 
   def show_agents_help
-    @log << { kind: :assistant, text: "Manager → worker multi-agent flow:" }
+    @log << { kind: :assistant, text: 'Manager → worker multi-agent flow:' }
     [
-      "Your requests go to a manager agent with the usual file/shell tools plus a",
-      "`delegate` tool. For larger jobs it splits the work into focused subtasks and",
-      "hands each to a fresh worker agent that runs its own tool loop and reports back.",
+      'Your requests go to a manager agent with the usual file/shell tools plus a',
+      '`delegate` tool. For larger jobs it splits the work into focused subtasks and',
+      'hands each to a fresh worker agent that runs its own tool loop and reports back.',
       "Independent subtasks delegated in one turn run in parallel (up to #{Agents::MAX_PARALLEL} at once).",
-      "Worker activity shows up indented below (⌁ worker …). Workers can nest up to",
-      "#{Agents::MAX_DEPTH} level#{Agents::MAX_DEPTH == 1 ? "" : "s"} deep. Works on the anthropic / openai / openrouter / google / groq / ollama",
-      "providers (opencode runs its own server-side agent).",
-      "",
-      "Type /worker to give workers a different (e.g. cheaper/faster) model — even a",
-      "different provider. Or set AGENT_WORKER_PROVIDER / AGENT_WORKER_MODEL env vars.",
-      "Current workers: #{worker_summary || "same as manager (#{@provider&.model_label || "none"})"}"
+      'Worker activity shows up indented below (⌁ worker …). Workers can nest up to',
+      "#{Agents::MAX_DEPTH} level#{'s' unless Agents::MAX_DEPTH == 1} deep. " \
+      'Works on the anthropic / openai / openrouter / google / groq / ollama',
+      'providers (opencode runs its own server-side agent).',
+      '',
+      'Type /worker to give workers a different (e.g. cheaper/faster) model — even a',
+      'different provider. Or set AGENT_WORKER_PROVIDER / AGENT_WORKER_MODEL env vars.',
+      "Current workers: #{worker_summary || "same as manager (#{@provider&.model_label || 'none'})"}"
     ].each { |line| @log << { kind: :tool_result, text: line } }
     [self, nil]
   end
 
   private
 
+  # rubocop:disable Layout/LineLength -- the alternations match literal spaces,
+  # so they can't be wrapped with /x free-spacing without changing the pattern.
   def sanitize_agents_content(content)
-    cleaned = content.gsub(/\A\s*(?:Here is the AGENTS\.md file[:\s]*|Sure, here['\s]s the content[:\s]*|Here['\s]s the content[:\s]*|Below is the AGENTS\.md[:\s]*)\n*/i, "")
-    cleaned = cleaned.gsub(/\n*\s*(?:I hope this helps!|Let me know if you need anything else\.|Feel free to ask if you need more\.|Happy to help further\.)\s*\z/i, "")
-    cleaned.strip + "\n"
+    cleaned = content.gsub(
+      /\A\s*(?:Here is the AGENTS\.md file[:\s]*|Sure, here['\s]s the content[:\s]*|Here['\s]s the content[:\s]*|Below is the AGENTS\.md[:\s]*)\n*/i, ''
+    )
+    cleaned = cleaned.gsub(
+      /\n*\s*(?:I hope this helps!|Let me know if you need anything else\.|Feel free to ask if you need more\.|Happy to help further\.)\s*\z/i, ''
+    )
+    "#{cleaned.strip}\n"
   end
+  # rubocop:enable Layout/LineLength
 
   def ready_message
     text = "Coding agent ready — provider: #{@provider.label} · model: #{@provider.model_label}"
@@ -492,13 +454,13 @@ end
   def update_permission(message)
     key = message.to_s
     decision =
-      if message.enter? || key == "y" || key == "Y"
+      if message.enter? || key == 'y' || key == 'Y'
         :allow
-      elsif key == "a" || key == "A"
+      elsif %w[a A].include?(key)
         :always
-      elsif key == "p" || key == "P"
+      elsif %w[p P].include?(key)
         :persist
-      elsif key == "n" || key == "N" || message.esc?
+      elsif key == 'n' || key == 'N' || message.esc?
         :deny
       end
     return [self, nil] unless decision
@@ -515,18 +477,22 @@ end
 
     case decision
     when :allow
-      @log << { kind: :tool_result, text: "  allowed once" }
+      @log << { kind: :tool_result, text: '  allowed once' }
     when :always
-      @log << { kind: :tool_result, text: "  allowed for this session" }
+      @log << { kind: :tool_result, text: '  allowed for this session' }
     when :persist
-      @log << { kind: :tool_result, text: "  allowed permanently" }
+      @log << { kind: :tool_result, text: '  allowed permanently' }
     when :deny
-      @log << { kind: :tool_result, text: "  denied" }
+      @log << { kind: :tool_result, text: '  denied' }
     end
 
     pending[:reply] << decision
   end
 
+  # One branch per keybinding is intentional here: alt+left/ctrl+left (and the
+  # right-hand pair) share a body today, but they are separate bindings and are
+  # kept separate so either can diverge without untangling a merged condition.
+  # rubocop:disable Lint/DuplicateBranch
   def update_chat(message)
     if @thinking && message.esc?
       interrupt_agent
@@ -536,11 +502,11 @@ end
     return [self, nil] if @thinking
 
     if @diffs.any? && @input.empty?
-      if message.to_s == "["
+      if message.to_s == '['
         @diff_cursor = (@diff_cursor - 1) % @diffs.length
         return [self, nil]
       end
-      if message.to_s == "]"
+      if message.to_s == ']'
         @diff_cursor = (@diff_cursor + 1) % @diffs.length
         return [self, nil]
       end
@@ -582,43 +548,43 @@ end
       @cursor_pos = [@cursor_pos + 1, @input.length].min
       @suggest_cursor = 0
       [self, nil]
-    elsif message.to_s == "alt+left" || message.key_type == AgentCli::InputDrain::KEY_ALT_LEFT
+    elsif message.to_s == 'alt+left' || message.key_type == AgentCli::InputDrain::KEY_ALT_LEFT
       @cursor_pos = prev_word_boundary(@input, @cursor_pos)
       @suggest_cursor = 0
       [self, nil]
-    elsif message.to_s == "alt+right" || message.key_type == AgentCli::InputDrain::KEY_ALT_RIGHT
+    elsif message.to_s == 'alt+right' || message.key_type == AgentCli::InputDrain::KEY_ALT_RIGHT
       @cursor_pos = next_word_boundary(@input, @cursor_pos)
       @suggest_cursor = 0
       [self, nil]
-    elsif message.to_s == "ctrl+left" || message.key_type == AgentCli::InputDrain::KEY_CTRL_LEFT
+    elsif message.to_s == 'ctrl+left' || message.key_type == AgentCli::InputDrain::KEY_CTRL_LEFT
       @cursor_pos = prev_word_boundary(@input, @cursor_pos)
       @suggest_cursor = 0
       [self, nil]
-    elsif message.to_s == "ctrl+right" || message.key_type == AgentCli::InputDrain::KEY_CTRL_RIGHT
+    elsif message.to_s == 'ctrl+right' || message.key_type == AgentCli::InputDrain::KEY_CTRL_RIGHT
       @cursor_pos = next_word_boundary(@input, @cursor_pos)
       @suggest_cursor = 0
       [self, nil]
     elsif message.backspace?
-      if @cursor_pos > 0
-        @input = @input[0...@cursor_pos - 1] + (@input[@cursor_pos..] || "")
+      if @cursor_pos.positive?
+        @input = @input[0...(@cursor_pos - 1)] + (@input[@cursor_pos..] || '')
         @cursor_pos -= 1
       end
       @suggest_cursor = 0
       [self, nil]
-    elsif message.to_s == "alt+backspace" || message.key_type == AgentCli::InputDrain::KEY_ALT_BACKSPACE
+    elsif message.to_s == 'alt+backspace' || message.key_type == AgentCli::InputDrain::KEY_ALT_BACKSPACE
       # Delete the previous word (opt+delete / alt+backspace)
       new_cursor = prev_word_boundary(@input, @cursor_pos)
-      @input = @input[0...new_cursor] + (@input[@cursor_pos..] || "")
+      @input = @input[0...new_cursor] + (@input[@cursor_pos..] || '')
       @cursor_pos = new_cursor
       @suggest_cursor = 0
       [self, nil]
     elsif message.space?
-      @input = @input[0...@cursor_pos] + " " + (@input[@cursor_pos..] || "")
+      @input = "#{@input[0...@cursor_pos]} #{@input[@cursor_pos..] || ''}"
       @cursor_pos += 1
       @suggest_cursor = 0
       [self, nil]
     elsif (text = typed_text(message))
-      @input = @input[0...@cursor_pos] + text + (@input[@cursor_pos..] || "")
+      @input = @input[0...@cursor_pos] + text + (@input[@cursor_pos..] || '')
       @cursor_pos += text.length
       @suggest_cursor = 0
       [self, nil]
@@ -626,6 +592,7 @@ end
       [self, nil]
     end
   end
+  # rubocop:enable Lint/DuplicateBranch
 
   def update_picker(message)
     return [self, nil] if @models_loading
@@ -642,13 +609,13 @@ end
     items = current_menu_items
     return [self, nil] if items.empty?
 
-    if message.up? || message.to_s == "k"
+    if message.up? || message.to_s == 'k'
       @menu_cursor = (@menu_cursor - 1) % items.length
       ensure_cursor_visible
       return [self, nil]
     end
 
-    if message.down? || message.to_s == "j"
+    if message.down? || message.to_s == 'j'
       @menu_cursor = (@menu_cursor + 1) % items.length
       ensure_cursor_visible
       return [self, nil]
@@ -672,7 +639,7 @@ end
   def update_manual_entry(message)
     if message.esc?
       @mode = :pick_model
-      @manual_input = ""
+      @manual_input = ''
       @manual_error = nil
       return [self, nil]
     end
@@ -680,13 +647,13 @@ end
     return confirm_manual_model if message.enter?
 
     if message.backspace?
-      @manual_input = @manual_input[0...-1] || ""
+      @manual_input = @manual_input[0...-1] || ''
       @manual_error = nil
       return [self, nil]
     end
 
     if message.space?
-      @manual_input += " "
+      @manual_input += ' '
       @manual_error = nil
       return [self, nil]
     end
@@ -711,7 +678,7 @@ end
     when :pick_model
       if item.other?
         @mode = :manual_model
-        @manual_input = ""
+        @manual_input = ''
         @manual_error = nil
         [self, nil]
       else
@@ -743,7 +710,7 @@ end
           begin
             items = provider.fetch_models
             FetchDone.new(items: items)
-          rescue => e
+          rescue StandardError => e
             FetchDone.new(error: "#{e.class}: #{e.message}")
           end
         }
@@ -768,7 +735,7 @@ end
     @mode = :chat
     @picker_from_chat = false
     @pending_model_id = nil
-    @api_key_input = ""
+    @api_key_input = ''
     @api_key_error = nil
     @messages = []
     @usage = Usage.blank
@@ -776,18 +743,18 @@ end
     @picker_error = nil
     @log << ready_message
     unless was_chat
-      @log << { kind: :assistant, text: "Ask me to read, write, or run something. Type /providers to switch." }
+      @log << { kind: :assistant, text: 'Ask me to read, write, or run something. Type /providers to switch.' }
     end
     offer_save_model_set
     [self, nil]
-  rescue Settings::MissingApiKeyError => e
+  rescue Settings::MissingApiKeyError
     @pending_model_id = model_id
     @mode = :enter_api_key
-    @api_key_input = ""
+    @api_key_input = ''
     @api_key_error = nil
     @picker_error = nil
     [self, nil]
-  rescue => e
+  rescue StandardError => e
     @picker_error = e.message
     if @picker_from_chat
       @mode = :pick_model
@@ -800,7 +767,7 @@ end
   def update_api_key_entry(message)
     if message.esc?
       @mode = :pick_model
-      @api_key_input = ""
+      @api_key_input = ''
       @api_key_error = nil
       return [self, nil]
     end
@@ -808,31 +775,31 @@ end
     return confirm_api_key if message.enter?
 
     if message.backspace?
-      @api_key_input = @api_key_input[0...-1] || ""
+      @api_key_input = @api_key_input[0...-1] || ''
       @api_key_error = nil
       return [self, nil]
     end
 
     # Ctrl+V / Cmd often arrives as ctrl+v — pull from system clipboard.
-    if message.to_s == "ctrl+v"
+    if message.to_s == 'ctrl+v'
       pasted = AgentCli::InputDrain.clipboard_text
       if pasted && !pasted.empty?
-        @api_key_input += pasted.gsub(/[\r\n\t]+/, "").strip
+        @api_key_input += pasted.gsub(/[\r\n\t]+/, '').strip
         @api_key_error = nil
       else
-        @api_key_error = "clipboard empty (try paste, or ctrl+v)"
+        @api_key_error = 'clipboard empty (try paste, or ctrl+v)'
       end
       return [self, nil]
     end
 
     if message.space?
-      @api_key_input += " "
+      @api_key_input += ' '
       @api_key_error = nil
       return [self, nil]
     end
 
     if (text = typed_text(message))
-      @api_key_input += text.gsub(/[\r\n\t]+/, "")
+      @api_key_input += text.gsub(/[\r\n\t]+/, '')
       @api_key_error = nil
       return [self, nil]
     end
@@ -845,8 +812,8 @@ end
     return nil unless message.is_a?(Bubbletea::KeyMessage)
     return nil if message.ctrl? || message.enter? || message.backspace? || message.esc?
     return nil if message.up? || message.down? || message.left? || message.right?
-    return nil if message.to_s == "alt+left" || message.to_s == "alt+right"
-    return nil if message.to_s == "ctrl+left" || message.to_s == "ctrl+right"
+    return nil if ['alt+left', 'alt+right'].include?(message.to_s)
+    return nil if ['ctrl+left', 'ctrl+right'].include?(message.to_s)
     return nil if message.tab?
 
     if message.runes?
@@ -866,14 +833,10 @@ end
 
     # Skip over any trailing whitespace/non-word chars at current position.
     scan = pos - 1
-    while scan >= 0 && text[scan] =~ /\s/
-      scan -= 1
-    end
+    scan -= 1 while scan >= 0 && text[scan] =~ /\s/
 
     # Now skip the word (non-whitespace) backwards.
-    while scan >= 0 && text[scan] !~ /\s/
-      scan -= 1
-    end
+    scan -= 1 while scan >= 0 && text[scan] !~ /\s/
 
     # pos is now just after the last whitespace before the word (or -1).
     (scan + 1).clamp(0, text.length)
@@ -887,25 +850,15 @@ end
     scan = pos
 
     # Skip leading whitespace from current position.
-    while scan < len && text[scan] =~ /\s/
-      scan += 1
-    end
+    scan += 1 while scan < len && text[scan] =~ /\s/
 
-    # If we're already past a word, skip it first.
-    if pos < len && text[pos] !~ /\s/
-      while scan < len && text[scan] !~ /\s/
-        scan += 1
-      end
-      # Skip trailing whitespace to land at the start of the next word.
-      while scan < len && text[scan] =~ /\s/
-        scan += 1
-      end
-    else
-      # We were on whitespace; skip to the next word start.
-      while scan < len && text[scan] =~ /\s/
-        scan += 1
-      end
-    end
+    # If we're already past a word, skip it first. `mid_word` is loop-invariant,
+    # so folding it into the condition matches the original guarded loop.
+    mid_word = pos < len && text[pos] !~ /\s/
+    scan += 1 while mid_word && scan < len && text[scan] !~ /\s/
+
+    # Either way we now skip whitespace to land at the start of the next word.
+    scan += 1 while scan < len && text[scan] =~ /\s/
 
     scan.clamp(0, text.length)
   end
@@ -913,60 +866,60 @@ end
   def confirm_api_key
     key = @api_key_input.strip
     if key.empty?
-      @api_key_error = "paste or type your API key"
+      @api_key_error = 'paste or type your API key'
       return [self, nil]
     end
 
     env_name = @selected_provider&.api_key_env
     unless env_name
-      @api_key_error = "this provider does not need an API key"
+      @api_key_error = 'this provider does not need an API key'
       return [self, nil]
     end
 
     Settings.save_api_key(env_name, key)
-    @api_key_input = ""
+    @api_key_input = ''
     activate_provider(@pending_model_id)
-  rescue => e
+  rescue StandardError => e
     @api_key_error = e.message
     [self, nil]
   end
 
   def view_api_key_entry
-    env_name = @selected_provider&.api_key_env || "API_KEY"
+    env_name = @selected_provider&.api_key_env || 'API_KEY'
     masked =
       if @api_key_input.empty?
-        @hint.render(" paste key")
+        @hint.render(' paste key')
       else
-        "•" * [@api_key_input.length, 64].min
+        '•' * [@api_key_input.length, 64].min
       end
 
     lines = [
       @bot.render("Enter #{env_name}:"),
       @hint.render(api_key_help_url(env_name)),
-      ""
+      ''
     ]
     lines << @err.render("! #{@api_key_error}") if @api_key_error
-    lines << "#{@prompt.render("key")} #{masked}"
-    lines << ""
-    lines << @hint.render("paste or ctrl+v · enter save · esc back · ctrl+c quit")
+    lines << "#{@prompt.render('key')} #{masked}"
+    lines << ''
+    lines << @hint.render('paste or ctrl+v · enter save · esc back · ctrl+c quit')
     lines.join("\n")
   end
 
   def api_key_help_url(env_name)
     case env_name
-    when "OPENROUTER_API_KEY" then "https://openrouter.ai/keys  ·  saved to ~/.agent-cli/settings.json"
-    when "ANTHROPIC_API_KEY"  then "https://console.anthropic.com/  ·  saved to ~/.agent-cli/settings.json"
-    when "OPENAI_API_KEY"     then "https://platform.openai.com/api-keys  ·  saved to ~/.agent-cli/settings.json"
-    when "GEMINI_API_KEY"     then "https://aistudio.google.com/apikey  ·  saved to ~/.agent-cli/settings.json"
-    when "GROQ_API_KEY"       then "https://console.groq.com/keys  ·  saved to ~/.agent-cli/settings.json"
-    else "saved to ~/.agent-cli/settings.json"
+    when 'OPENROUTER_API_KEY' then 'https://openrouter.ai/keys  ·  saved to ~/.agent-cli/settings.json'
+    when 'ANTHROPIC_API_KEY'  then 'https://console.anthropic.com/  ·  saved to ~/.agent-cli/settings.json'
+    when 'OPENAI_API_KEY'     then 'https://platform.openai.com/api-keys  ·  saved to ~/.agent-cli/settings.json'
+    when 'GEMINI_API_KEY'     then 'https://aistudio.google.com/apikey  ·  saved to ~/.agent-cli/settings.json'
+    when 'GROQ_API_KEY'       then 'https://console.groq.com/keys  ·  saved to ~/.agent-cli/settings.json'
+    else 'saved to ~/.agent-cli/settings.json'
     end
   end
 
   def confirm_manual_model
     spec = @manual_input.strip
     if spec.empty?
-      @manual_error = "enter a model id"
+      @manual_error = 'enter a model id'
       return [self, nil]
     end
 
@@ -974,7 +927,7 @@ end
       spec = @selected_provider.resolve_manual_input(spec, @model_items)
       begin
         @selected_provider.parse_model_spec(spec)
-      rescue => e
+      rescue StandardError => e
         @manual_error = "#{e.message}  (e.g. deepseek/deepseek-v4-flash)"
         return [self, nil]
       end
@@ -991,9 +944,9 @@ end
     @menu_scroll = 0
     @models_error = nil
     @models_loading = false
-    @manual_input = ""
+    @manual_input = ''
     @manual_error = nil
-    @api_key_input = ""
+    @api_key_input = ''
     @api_key_error = nil
     @pending_model_id = nil
     [self, nil]
@@ -1008,9 +961,9 @@ end
     @menu_scroll = 0
     @models_error = nil
     @models_loading = false
-    @manual_input = ""
+    @manual_input = ''
     @manual_error = nil
-    @api_key_input = ""
+    @api_key_input = ''
     @api_key_error = nil
     @picker_error = nil
     @pending_model_id = nil
@@ -1018,8 +971,8 @@ end
   end
 
   def slash_suggestions
-    return [] unless @input.start_with?("/")
-    return [] if @input.include?(" ")
+    return [] unless @input.start_with?('/')
+    return [] if @input.include?(' ')
 
     Commands.matching(@input)
   end
@@ -1030,10 +983,10 @@ end
 
   def input_ghost_suffix
     suggestions = slash_suggestions
-    return "" if suggestions.empty?
+    return '' if suggestions.empty?
 
     match = suggestions[@suggest_cursor]
-    return "" unless match[:name].start_with?(@input) && match[:name].length > @input.length
+    return '' unless match[:name].start_with?(@input) && match[:name].length > @input.length
 
     @composer_dim_bg.render(match[:name][@input.length..])
   end
@@ -1043,7 +996,7 @@ end
     @suggest_cursor = 0 if @suggest_cursor >= suggestions.length
 
     suggestions.map.with_index do |cmd, i|
-      prefix = i == @suggest_cursor ? "> " : "  "
+      prefix = i == @suggest_cursor ? '> ' : '  '
       line = "#{prefix}#{cmd[:name]}  —  #{cmd[:desc]}"
       i == @suggest_cursor ? @you.render(line) : @hint.render(line)
     end
@@ -1078,17 +1031,21 @@ end
 
     if @picker_error
       lines << @err.render("! #{@picker_error}")
-      lines << ""
+      lines << ''
     end
 
     if @mode == :pick_model && @models_loading
-      url = @selected_provider&.base_url || "http://127.0.0.1:11434"
+      url = @selected_provider&.base_url || 'http://127.0.0.1:11434'
       lines << @tool.render("#{SPINNER[@frame]} loading models from #{url}…")
     elsif @mode == :pick_model && @models_error
       lines << @err.render("! #{@models_error}")
-      hint = @selected_provider&.respond_to?(:server_hint) ? @selected_provider.server_hint : "check that the server is running"
+      hint = if @selected_provider.respond_to?(:server_hint)
+               @selected_provider.server_hint
+             else
+               'check that the server is running'
+             end
       lines << @hint.render(hint)
-      lines << ""
+      lines << ''
     end
 
     items = current_menu_items
@@ -1097,7 +1054,7 @@ end
     visible.each_with_index do |item, i|
       idx = @menu_scroll + i
       selected = idx == @menu_cursor
-      prefix = selected ? "> " : "  "
+      prefix = selected ? '> ' : '  '
       text =
         if item.is_a?(Hash) && item[:desc]
           "#{item[:label]}  —  #{item[:desc]}"
@@ -1109,29 +1066,29 @@ end
       lines << (selected ? @you.render("#{prefix}#{text}") : @hint.render("#{prefix}#{text}"))
     end
 
-    lines << ""
+    lines << ''
     lines << @hint.render(picker_hint)
     lines.join("\n")
   end
 
   def picker_hint
     if @mode == :pick_provider && @picker_from_chat
-      "↑/↓ move · enter select · esc cancel · ctrl+c quit"
+      '↑/↓ move · enter select · esc cancel · ctrl+c quit'
     else
-      "↑/↓ move · enter select · esc back · ctrl+c quit"
+      '↑/↓ move · enter select · esc back · ctrl+c quit'
     end
   end
 
   def view_manual_entry
-    hint = @selected_provider&.manual_entry_hint || "model id"
+    hint = @selected_provider&.manual_entry_hint || 'model id'
     lines = [
       @bot.render("Enter #{hint}:"),
-      ""
+      ''
     ]
     lines << @err.render("! #{@manual_error}") if @manual_error
-    lines << "#{@prompt.render("model")} #{@manual_input}#{@manual_input.empty? ? @hint.render(" type model id") : ""}"
-    lines << ""
-    lines << @hint.render("enter confirm · esc back · ctrl+c quit")
+    lines << "#{@prompt.render('model')} #{@manual_input}#{@hint.render(' type model id') if @manual_input.empty?}"
+    lines << ''
+    lines << @hint.render('enter confirm · esc back · ctrl+c quit')
     lines.join("\n")
   end
 
@@ -1141,15 +1098,15 @@ end
     detail = req[:detail].to_s
     tool = req[:tool].to_s
     status = @warn.render("allow #{tool}? #{detail}")
-    footer = @hint.render("y/enter allow once · a allow session · p allow permanently · n/esc deny · ctrl+c quit")
+    footer = @hint.render('y/enter allow once · a allow session · p allow permanently · n/esc deny · ctrl+c quit')
     usage = usage_line
 
-    content = lines + ["", status]
+    content = lines + ['', status]
     content << usage if usage
     content << footer
 
     padding = [@height - content.length, 0].max
-    ([""] * padding + content).join("\n")
+    (([''] * padding) + content).join("\n")
   end
 
   def view_chat
@@ -1162,14 +1119,14 @@ end
 
     # Everything above the footer: the conversation log plus any suggestions.
     body = lines
-    body += [""] + suggestions if suggestions.any?
+    body += [''] + suggestions if suggestions.any?
 
     if @diffs.any? && @width >= 80
       layout_with_diff_panel(body, footer)
     else
-      content = body + [""] + footer
+      content = body + [''] + footer
       padding = [@height - content.length, 0].max
-      ([""] * padding + content).join("\n")
+      (([''] * padding) + content).join("\n")
     end
   end
 
@@ -1183,13 +1140,13 @@ end
         ghost = input_ghost_suffix
         placeholder =
           if @input.empty? && slash_suggestions.empty?
-            @composer_dim_bg.render("type a request")
+            @composer_dim_bg.render('type a request')
           else
-            ""
+            ''
           end
         cell = @input[@cursor_pos]
-        cursor = @cur.render(cell || " ")
-        after = cell ? (@input[(@cursor_pos + 1)..] || "") : (@input[@cursor_pos..] || "")
+        cursor = @cur.render(cell || ' ')
+        after = cell ? (@input[(@cursor_pos + 1)..] || '') : (@input[@cursor_pos..] || '')
         "#{@input[0...@cursor_pos]}#{cursor}#{after}#{ghost}#{placeholder}"
       end
 
@@ -1197,15 +1154,15 @@ end
   end
 
   def composer_meta
-    mode = @composer_accent.render("Agent")
-    sep = @composer_dim_bg.render(" · ")
+    mode = @composer_accent.render('Agent')
+    sep = @composer_dim_bg.render(' · ')
     if @provider
       model = @composer_fg.render(@provider.model_label.to_s)
       provider = @composer_dim_bg.render(" #{@provider.label}")
-      worker = (w = worker_summary) ? @composer_dim_bg.render("  ⌁ #{w}") : ""
+      worker = (w = worker_summary) ? @composer_dim_bg.render("  ⌁ #{w}") : ''
       "#{mode}#{sep}#{model}#{provider}#{worker}"
     else
-      "#{mode}#{sep}#{@composer_dim_bg.render("no model — /providers")}"
+      "#{mode}#{sep}#{@composer_dim_bg.render('no model — /providers')}"
     end
   end
 
@@ -1215,22 +1172,27 @@ end
       if @thinking
         @composer_dim.render("#{SPINNER[@frame]}······  esc interrupt")
       else
-        ""
+        ''
       end
 
     usage = Usage.format_context(display_context_tokens, context_window)
     hint =
       if @diffs.any?
-        "#{@composer_key.render("[ ]")} #{@composer_dim.render("diffs")}  #{@composer_key.render("/")} #{@composer_dim.render("commands")}"
+        "#{@composer_key.render('[ ]')} #{@composer_dim.render('diffs')}  " \
+          "#{@composer_key.render('/')} #{@composer_dim.render('commands')}"
       elsif slash_command_active?
-        "#{@composer_key.render("tab")} #{@composer_dim.render("complete")}  #{@composer_key.render("enter")} #{@composer_dim.render("run")}"
+        "#{@composer_key.render('tab')} #{@composer_dim.render('complete')}  " \
+          "#{@composer_key.render('enter')} #{@composer_dim.render('run')}"
       else
-        "#{@composer_key.render("/")} #{@composer_dim.render("commands")}  #{@composer_key.render("opt+←")} #{@composer_dim.render("word-left")}  #{@composer_key.render("opt+→")} #{@composer_dim.render("word-right")}  #{@composer_key.render("opt+⌫")} #{@composer_dim.render("delete-word")}"
+        "#{@composer_key.render('/')} #{@composer_dim.render('commands')}  " \
+          "#{@composer_key.render('opt+←')} #{@composer_dim.render('word-left')}  " \
+          "#{@composer_key.render('opt+→')} #{@composer_dim.render('word-right')}  " \
+          "#{@composer_key.render('opt+⌫')} #{@composer_dim.render('delete-word')}"
       end
 
     right = "#{@composer_dim.render(usage)}  #{hint}"
     pad = [@width - strip_ansi(left).length - strip_ansi(right).length, 1].max
-    "#{left}#{" " * pad}#{right}"
+    "#{left}#{' ' * pad}#{right}"
   end
 
   # Prefer last API prompt size; otherwise rough-estimate from the in-flight transcript.
@@ -1243,8 +1205,8 @@ end
   def estimate_context_tokens
     chars = 0
     (@messages || []).each do |m|
-      chars += m["content"].to_s.length
-      if (tcs = m["tool_calls"]).is_a?(Array)
+      chars += m['content'].to_s.length
+      if (tcs = m['tool_calls']).is_a?(Array)
         tcs.each { |tc| chars += tc.to_s.length }
       end
     end
@@ -1255,7 +1217,7 @@ end
   end
 
   def context_window
-    if @provider.respond_to?(:context_window) && (w = @provider.context_window).to_i > 0
+    if @provider.respond_to?(:context_window) && (w = @provider.context_window).to_i.positive?
       w.to_i
     else
       Usage::DEFAULT_CONTEXT_WINDOW
@@ -1291,7 +1253,7 @@ end
     chat_lines = body.map { |line| truncate_display(line.to_s, chat_w) }
 
     # Pin the chat log to the bottom of the top-left region.
-    left = ([""] * [top_h - chat_lines.length, 0].max) + chat_lines.last(top_h)
+    left = ([''] * [top_h - chat_lines.length, 0].max) + chat_lines.last(top_h)
 
     rows = (0...top_h).map do |i|
       left_col = truncate_display(left[i].to_s, chat_w)
@@ -1303,60 +1265,60 @@ end
       end
     end
 
-    (rows + ([""] * gap) + footer).join("\n")
+    (rows + ([''] * gap) + footer).join("\n")
   end
 
   def render_diff_panel(width, height)
     return [] if @diffs.empty?
 
     diff = @diffs[@diff_cursor] || @diffs.last
-    header_style = Lipgloss::Style.new.foreground("#7D56F4").bold(true)
-    add_style    = Lipgloss::Style.new.foreground("#5AF78E")
-    del_style    = Lipgloss::Style.new.foreground("#FF6B6B")
-    hunk_style   = Lipgloss::Style.new.foreground("#66D9EF")
-    dim_style    = Lipgloss::Style.new.foreground("#555555")
-    border_style = Lipgloss::Style.new.foreground("#444444")
+    header_style = Lipgloss::Style.new.foreground('#7D56F4').bold(true)
+    add_style    = Lipgloss::Style.new.foreground('#5AF78E')
+    del_style    = Lipgloss::Style.new.foreground('#FF6B6B')
+    hunk_style   = Lipgloss::Style.new.foreground('#66D9EF')
+    dim_style    = Lipgloss::Style.new.foreground('#555555')
+    border_style = Lipgloss::Style.new.foreground('#444444')
 
     title =
       if @diffs.length > 1
         "diff #{@diff_cursor + 1}/#{@diffs.length}  [ / ]"
       else
-        "diff  [ / ]"
+        'diff  [ / ]'
       end
 
     raw = diff.split("\n")
     body = raw.first([height - 1, 1].max).map do |line|
       clipped = line.byteslice(0, width - 2).to_s
       styled =
-        if line.start_with?("@@")
+        if line.start_with?('@@')
           hunk_style.render(clipped)
-        elsif line.start_with?("+") && !line.start_with?("+++")
+        elsif line.start_with?('+') && !line.start_with?('+++')
           add_style.render(clipped)
-        elsif line.start_with?("-") && !line.start_with?("---")
+        elsif line.start_with?('-') && !line.start_with?('---')
           del_style.render(clipped)
-        elsif line.start_with?("---") || line.start_with?("+++")
+        elsif line.start_with?('---') || line.start_with?('+++')
           header_style.render(clipped)
         else
           dim_style.render(clipped)
         end
-      "#{border_style.render("│")}#{styled}"
+      "#{border_style.render('│')}#{styled}"
     end
 
-    top = "#{border_style.render("┌")}#{header_style.render(" #{title} ".ljust([width - 1, 0].max))}"
+    top = "#{border_style.render('┌')}#{header_style.render(" #{title} ".ljust([width - 1, 0].max))}"
     lines = [top] + body
     # Pad to the full height with border-only rows so the divider between the
     # chat log and the diff window is continuous, top to bottom.
-    lines << border_style.render("│") while lines.length < height
+    lines << border_style.render('│') while lines.length < height
     lines.first(height)
   end
 
   # Truncate to a visible width, preserving ANSI escapes (colors) while
   # only counting printable characters, and resetting styling at the cut.
   def truncate_display(str, width)
-    return "" if width <= 0
+    return '' if width <= 0
     return str if strip_ansi(str).length <= width
 
-    out = +""
+    out = +''
     visible = 0
     had_ansi = false
     i = 0
@@ -1368,6 +1330,7 @@ end
         i += m[0].length
       else
         break if visible >= width
+
         out << str[i]
         visible += 1
         i += 1
@@ -1380,20 +1343,20 @@ end
   # Right-pad to a visible width, ignoring ANSI escapes in the measurement.
   def pad_display(str, width)
     pad = [width - strip_ansi(str).length, 0].max
-    "#{str}#{" " * pad}"
+    "#{str}#{' ' * pad}"
   end
 
   def strip_ansi(str)
-    str.gsub(/\e\[[0-9;]*m/, "")
+    str.gsub(/\e\[[0-9;]*m/, '')
   end
 
   def picker_title
     case @mode
     when :pick_provider
-      "Select provider:"
+      'Select provider:'
     when :pick_model
-      @selected_provider&.model_picker_title || "Select model:"
-    else ""
+      @selected_provider&.model_picker_title || 'Select model:'
+    else ''
     end
   end
 
@@ -1435,7 +1398,7 @@ end
     return if items.empty?
 
     max_scroll = [items.length - menu_visible_budget, 0].max
-    @menu_scroll = [[@menu_scroll, 0].max, max_scroll].min
+    @menu_scroll = @menu_scroll.clamp(0, max_scroll)
   end
 
   def history_up
@@ -1444,7 +1407,7 @@ end
     if @history_index.nil?
       @history_draft = @input
       @history_index = @history.length - 1
-    elsif @history_index > 0
+    elsif @history_index.positive?
       @history_index -= 1
     else
       return
@@ -1473,7 +1436,7 @@ end
   def remember_prompt(text)
     @history = PromptHistory.append(@history, text)
     @history_index = nil
-    @history_draft = ""
+    @history_draft = ''
   end
 
   def submit
@@ -1482,33 +1445,33 @@ end
 
     remember_prompt(text)
 
-    if text.start_with?("/") && !text.include?(" ")
+    if text.start_with?('/') && !text.include?(' ')
       matches = Commands.matching(text)
       if matches.empty?
         @log << { kind: :error, text: "unknown command #{text.inspect} — type /help" }
-        @input = ""
+        @input = ''
         @cursor_pos = 0
         @suggest_cursor = 0
         return [self, nil]
       end
 
       chosen = matches.find { |cmd| cmd[:name] == text } || matches[@suggest_cursor] || matches.first
-      @input = ""
+      @input = ''
       @cursor_pos = 0
       @suggest_cursor = 0
       return Commands.run(chosen[:name], self)
     end
 
     unless @provider
-      @log << { kind: :error, text: "no provider connected — type /providers" }
-      @input = ""
+      @log << { kind: :error, text: 'no provider connected — type /providers' }
+      @input = ''
       @cursor_pos = 0
       return [self, nil]
     end
 
     @log << { kind: :user, text: text }
-    @messages << { "role" => "user", "content" => text }
-    @input = ""
+    @messages << { 'role' => 'user', 'content' => text }
+    @input = ''
     @cursor_pos = 0
     @thinking = true
     @diffs = []
@@ -1527,12 +1490,14 @@ end
 
   def drain_events
     until @events.empty?
-      ev = @events.pop(true) rescue break
+      ev = begin
+        @events.pop(true)
+      rescue StandardError
+        break
+      end
       case ev[:kind]
       when :done
-        if @pending_permission
-          reply_permission(:deny)
-        end
+        reply_permission(:deny) if @pending_permission
         # If we were generating AGENTS.md, capture the assistant response and write it
         if @pending_init
           @pending_init = false
@@ -1541,22 +1506,19 @@ end
           if assistant_msg && assistant_msg[:text]
             content = sanitize_agents_content(assistant_msg[:text])
             # If CLAUDE.md existed, prepend a reference to it
-            if @claude_path_existed
-              content = "@CLAUDE.md\n\n" + content
-            end
+            content = "@CLAUDE.md\n\n#{content}" if @claude_path_existed
             # Refuse unsafe content: AGENTS.md is auto-loaded into every session.
             reasons = AgentsGuard.flagged(content)
             if reasons.empty?
-              File.write("AGENTS.md", content)
-              @log << { kind: :assistant, text: "Created AGENTS.md with project summary:" }
-              @log << { kind: :tool_result, text: content }
+              File.write('AGENTS.md', content)
+              @log << { kind: :assistant, text: 'Created AGENTS.md with project summary:' }
             else
               @log << { kind: :assistant,
-                        text: "Refused to write AGENTS.md — generated content looks unsafe " \
-                              "(#{reasons.join("; ")}). Review it below and create the file " \
+                        text: 'Refused to write AGENTS.md — generated content looks unsafe ' \
+                              "(#{reasons.join('; ')}). Review it below and create the file " \
                               "manually if it's legitimate:" }
-              @log << { kind: :tool_result, text: content }
             end
+            @log << { kind: :tool_result, text: content }
           end
         end
         @thinking = false
@@ -1584,7 +1546,7 @@ end
     wt = @worker_thread
     if wt&.alive?
       wt.kill
-      @log << { kind: :assistant, text: "— interrupted —" }
+      @log << { kind: :assistant, text: '— interrupted —' }
     end
     @worker_thread = nil
   end
@@ -1598,7 +1560,7 @@ end
     rendered = @log.flat_map do |e|
       styled =
         case e[:kind]
-        when :user         then "#{@you.render("you")} #{e[:text]}"
+        when :user         then "#{@you.render('you')} #{e[:text]}"
         when :assistant    then @bot.render(e[:text].to_s)
         when :tool         then @tool.render("→ #{e[:text]}")
         when :tool_result  then @toolok.render("  #{e[:text]}")
@@ -1608,7 +1570,7 @@ end
         end
       next [] unless styled
 
-      indent = "  " * e[:depth].to_i
+      indent = '  ' * e[:depth].to_i
       styled.to_s.split("\n").map { |line| indent.empty? ? line : "#{indent}#{line}" }
     end
 

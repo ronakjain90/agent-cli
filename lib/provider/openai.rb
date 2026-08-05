@@ -1,32 +1,32 @@
 # frozen_string_literal: true
 
-require "json"
-require "net/http"
-require "uri"
+require 'json'
+require 'net/http'
+require 'uri'
 
-require_relative "../agent_cli/constants"
-require_relative "../agent_cli/tools"
-require_relative "../agent_cli/agents"
-require_relative "../agent_cli/usage"
-require_relative "base"
+require_relative '../agent_cli/constants'
+require_relative '../agent_cli/tools'
+require_relative '../agent_cli/agents'
+require_relative '../agent_cli/usage'
+require_relative 'base'
 
 class Provider
   class Openai < Provider
     MODELS = [
-      { id: "gpt-4o",      label: "GPT-4o           — most capable vision model" },
-      { id: "gpt-4o-mini", label: "GPT-4o mini      — fast, affordable" },
-      { id: "o3-mini",     label: "o3-mini          — efficient reasoning" },
-      { id: "o1",          label: "o1               — advanced reasoning" }
+      { id: 'gpt-4o',      label: 'GPT-4o           — most capable vision model' },
+      { id: 'gpt-4o-mini', label: 'GPT-4o mini      — fast, affordable' },
+      { id: 'o3-mini',     label: 'o3-mini          — efficient reasoning' },
+      { id: 'o1',          label: 'o1               — advanced reasoning' }
     ].freeze
-    DEFAULT_MODEL = "gpt-4o"
+    DEFAULT_MODEL = 'gpt-4o'
 
     def self.id = :openai
-    def self.label = "openai"
-    def self.description = "GPT / o-series via OpenAI API (needs OPENAI_API_KEY)"
-    def self.model_picker_title = "Select OpenAI model:"
+    def self.label = 'openai'
+    def self.description = 'GPT / o-series via OpenAI API (needs OPENAI_API_KEY)'
+    def self.model_picker_title = 'Select OpenAI model:'
 
     def api_key_env
-      "OPENAI_API_KEY"
+      'OPENAI_API_KEY'
     end
 
     def build(model_id)
@@ -42,7 +42,7 @@ class OpenaiProvider
   # Default system prompt when no agent role is active (kept for compatibility).
   SYSTEM = Agents::MANAGER_SYSTEM
 
-  DEFAULT_ENDPOINT = "https://api.openai.com/v1/chat/completions"
+  DEFAULT_ENDPOINT = 'https://api.openai.com/v1/chat/completions'
 
   attr_reader :model, :uri
 
@@ -54,7 +54,7 @@ class OpenaiProvider
   end
 
   def label
-    "openai"
+    'openai'
   end
 
   def model_label
@@ -88,30 +88,30 @@ class OpenaiProvider
         break
       end
 
-      if resp["error"]
-        events << { kind: :error, text: resp.dig("error", "message") || resp.inspect, depth: depth }
+      if resp['error']
+        events << { kind: :error, text: resp.dig('error', 'message') || resp.inspect, depth: depth }
         break
       end
 
-      if (usage = Usage.from_openai(resp["usage"]))
+      if (usage = Usage.from_openai(resp['usage']))
         events << { kind: :usage, usage: usage }
       end
 
-      choice = resp.dig("choices", 0)
-      msg    = choice&.dig("message")
+      choice = resp.dig('choices', 0)
+      msg    = choice&.dig('message')
 
       unless msg
         events << { kind: :error, text: "unexpected response: #{resp.inspect}", depth: depth }
         break
       end
 
-      content = msg["content"]
+      content = msg['content']
       if content && !content.strip.empty?
         final_text = content
         events << { kind: :assistant, text: content, depth: depth }
       end
 
-      tool_calls = msg["tool_calls"]
+      tool_calls = msg['tool_calls']
       break unless tool_calls&.any?
 
       # Recording these calls would leave them unanswered, which the API rejects
@@ -121,24 +121,24 @@ class OpenaiProvider
         break
       end
 
-      assistant_msg = { "role" => "assistant", "content" => content }
-      assistant_msg["tool_calls"] = tool_calls
+      assistant_msg = { 'role' => 'assistant', 'content' => content }
+      assistant_msg['tool_calls'] = tool_calls
       messages << assistant_msg
 
       calls = tool_calls.map do |tc|
-        fn  = tc["function"] || {}
-        raw = fn["arguments"].to_s
+        fn  = tc['function'] || {}
+        raw = fn['arguments'].to_s
         parsed = raw.strip.empty? ? {} : JSON.parse(raw)
-        { id: tc["id"], name: fn["name"], input: parsed }
+        { id: tc['id'], name: fn['name'], input: parsed }
       rescue JSON::ParserError => e
         # Weak models often emit malformed JSON for large payloads (e.g. a
         # write_file `content` full of code). Don't swallow it into `{}` — that
         # silently drops the edit. Surface it so the model re-issues valid JSON.
-        fn = tc["function"] || {}
-        { id: tc["id"], name: fn["name"], parse_error: e.message }
+        fn = tc['function'] || {}
+        { id: tc['id'], name: fn['name'], parse_error: e.message }
       end
       run_tool_batch(calls, events, depth).each do |r|
-        messages << { "role" => "tool", "tool_call_id" => r[:id], "content" => r[:result] }
+        messages << { 'role' => 'tool', 'tool_call_id' => r[:id], 'content' => r[:result] }
       end
       messages = Agents.trim_messages(messages)
     end
@@ -159,7 +159,7 @@ class OpenaiProvider
   def openai_tool_schemas
     active_tools.map do |t|
       {
-        type: "function",
+        type: 'function',
         function: {
           name: t[:name],
           description: t[:description],
@@ -175,20 +175,20 @@ class OpenaiProvider
     body = JSON.generate(
       model: @model,
       max_tokens: [MAX_TOKENS, MAX_OUT_TOKENS].min,
-      messages: [{ role: "system", content: active_system }] + messages,
+      messages: [{ role: 'system', content: active_system }] + messages,
       tools: openai_tool_schemas,
-      tool_choice: "auto"
+      tool_choice: 'auto'
     )
     headers = {
-      "authorization" => "Bearer #{@api_key}",
-      "content-type"  => "application/json"
+      'authorization' => "Bearer #{@api_key}",
+      'content-type' => 'application/json'
     }
 
     res = HTTP.request(@uri, body: body, headers: headers, read_timeout: 120,
-                            log_label: "OpenAI POST", log_handle: @log_handle)
+                             log_label: 'OpenAI POST', log_handle: @log_handle)
     parse_response(res.body)
-  rescue => e
-    { "error" => { "message" => "#{e.class}: #{e.message}" } }
+  rescue StandardError => e
+    { 'error' => { 'message' => "#{e.class}: #{e.message}" } }
   end
 
   def parse_response(body)
@@ -203,8 +203,8 @@ class OpenaiProvider
     end
     return data if data.is_a?(Hash)
 
-    { "error" => { "message" => "unexpected response: #{data.inspect}" } }
-  rescue => e
-    { "error" => { "message" => "#{e.class}: #{e.message}" } }
+    { 'error' => { 'message' => "unexpected response: #{data.inspect}" } }
+  rescue StandardError => e
+    { 'error' => { 'message' => "#{e.class}: #{e.message}" } }
   end
 end

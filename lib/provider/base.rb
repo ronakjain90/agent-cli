@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require_relative "../agent_cli/model"
-require_relative "../agent_cli/preferences"
-require_relative "../agent_cli/settings"
+require_relative '../agent_cli/model'
+require_relative '../agent_cli/preferences'
+require_relative '../agent_cli/settings'
 
 # Metadata + factory for each provider kind.
 class Provider
@@ -12,23 +12,26 @@ class Provider
     end
 
     def find(id)
-      id = :google if id.to_s == "gemini"
+      id = :google if id.to_s == 'gemini'
       all.find { |p| p.id == id.to_sym }
     end
 
     def picker_bypassed?
-      provider = ENV["AGENT_PROVIDER"]
-      model = ENV["AGENT_MODEL"]
+      provider = ENV.fetch('AGENT_PROVIDER', nil)
+      model = ENV.fetch('AGENT_MODEL', nil)
       !(provider.nil? || provider.empty?) || !(model.nil? || model.empty?)
     end
 
     def from_env
-      kind = env_or("AGENT_PROVIDER", "anthropic")
+      kind = env_or('AGENT_PROVIDER', 'anthropic')
       provider = find(kind.to_sym)
-      abort "Unknown AGENT_PROVIDER #{ENV["AGENT_PROVIDER"].inspect} (expected 'anthropic', 'openai', 'openrouter', 'google', 'groq', 'ollama', or 'opencode')." unless provider
+      unless provider
+        abort "Unknown AGENT_PROVIDER #{ENV['AGENT_PROVIDER'].inspect} (expected 'anthropic', " \
+              "'openai', 'openrouter', 'google', 'groq', 'ollama', or 'opencode')."
+      end
 
       attach_worker(provider.build_from_env, kind.to_sym)
-    rescue => e
+    rescue StandardError => e
       abort e.message
     end
 
@@ -61,16 +64,16 @@ class Provider
 
       manager.worker_provider = worker
       manager
-    rescue
+    rescue StandardError
       manager
     end
 
     # Worker [provider_id, model_id] from env (AGENT_WORKER_PROVIDER /
     # AGENT_WORKER_MODEL) or preferences. Provider defaults to the manager's.
     def worker_target(default_provider_id)
-      env_model = ENV["AGENT_WORKER_MODEL"]
+      env_model = ENV.fetch('AGENT_WORKER_MODEL', nil)
       unless env_model.nil? || env_model.empty?
-        env_prov = ENV["AGENT_WORKER_PROVIDER"]
+        env_prov = ENV.fetch('AGENT_WORKER_PROVIDER', nil)
         pid = env_prov.nil? || env_prov.empty? ? default_provider_id : env_prov.to_sym
         return [pid, env_model]
       end
@@ -93,13 +96,13 @@ class Provider
       return [from_env, nil] if picker_bypassed?
 
       [from_preferences, nil]
-    rescue => e
+    rescue StandardError => e
       [nil, e.message]
     end
 
     # Treat an unset OR exported-but-empty env var as absent.
     def env_or(name, default)
-      v = ENV[name]
+      v = ENV.fetch(name, nil)
       v.nil? || v.empty? ? default : v
     end
   end
@@ -133,7 +136,7 @@ class Provider
   end
 
   def build_from_env
-    build(self.class.env_or("AGENT_MODEL", self.class::DEFAULT_MODEL))
+    build(self.class.env_or('AGENT_MODEL', self.class::DEFAULT_MODEL))
   end
 
   def resolve_manual_input(input, _model_list)
@@ -141,7 +144,7 @@ class Provider
   end
 
   def manual_entry_hint
-    "model id"
+    'model id'
   end
 
   def show_model_id_in_picker?

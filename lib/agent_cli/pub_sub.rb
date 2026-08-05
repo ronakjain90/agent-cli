@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require "mutex_m"
-require "securerandom"
+require 'mutex_m'
+require 'securerandom'
 
 # Thread-safe Publish-Subscribe message broker for communication between
 # planner (manager) and worker agents, as well as UI event streaming.
@@ -18,10 +18,10 @@ module PubSub
 
     def matches?(channel)
       ch = channel.to_s
-      return true if pattern == "*" || pattern == ch
+      return true if ['*', ch].include?(pattern)
 
       File.fnmatch?(pattern, ch, File::FNM_EXTGLOB | File::FNM_CASEFOLD)
-    rescue
+    rescue StandardError
       pattern == ch
     end
 
@@ -48,8 +48,8 @@ module PubSub
     # Subscribe to a channel or wildcard pattern (e.g. "planner", "worker:*", "*").
     # Accepts a block that receives (channel, payload).
     # Returns the subscription_id string.
-    def subscribe(pattern = "*", subscriber_id = nil, &block)
-      raise ArgumentError, "Block required to subscribe" unless block_given?
+    def subscribe(pattern = '*', subscriber_id = nil, &block)
+      raise ArgumentError, 'Block required to subscribe' unless block_given?
 
       sub_id = SecureRandom.uuid
       sub = Subscription.new(sub_id, pattern, subscriber_id, block)

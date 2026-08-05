@@ -1,10 +1,14 @@
 # frozen_string_literal: true
 
-source "https://rubygems.org"
+source 'https://rubygems.org'
 
 # Runtime dependencies come from the gemspec.
 gemspec
 
 group :test do
   gem 'minitest'
+end
+
+group :development do
+  gem 'rubocop', '~> 1.88'
 end

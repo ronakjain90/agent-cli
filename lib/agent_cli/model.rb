@@ -14,7 +14,7 @@ class Model
   end
 
   def self.other
-    @other ||= new(id: :other, label: "other…")
+    @other ||= new(id: :other, label: 'other…')
   end
 
   def display_line(show_id: false)

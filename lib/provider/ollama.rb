@@ -1,43 +1,43 @@
 # frozen_string_literal: true
 
-require "json"
-require "net/http"
-require "uri"
+require 'json'
+require 'net/http'
+require 'uri'
 
-require_relative "../agent_cli/constants"
-require_relative "../agent_cli/model"
-require_relative "../agent_cli/tools"
-require_relative "../agent_cli/settings"
-require_relative "base"
-require_relative "openai"
+require_relative '../agent_cli/constants'
+require_relative '../agent_cli/model'
+require_relative '../agent_cli/tools'
+require_relative '../agent_cli/settings'
+require_relative 'base'
+require_relative 'openai'
 
 class Provider
   class Ollama < Provider
-    DEFAULT_MODEL = "llama3.1"
+    DEFAULT_MODEL = 'llama3.1'
 
     def self.id = :ollama
-    def self.label = "ollama"
-    def self.description = "local Ollama server — run `ollama serve` first"
-    def self.model_picker_title = "Select Ollama model:"
+    def self.label = 'ollama'
+    def self.description = 'local Ollama server — run `ollama serve` first'
+    def self.model_picker_title = 'Select Ollama model:'
 
     def models
       []
     end
 
     def fetch_models
-      uri = URI.join(base_url.end_with?("/") ? base_url : "#{base_url}/", "api/tags")
+      uri = URI.join(base_url.end_with?('/') ? base_url : "#{base_url}/", 'api/tags')
 
       req = Net::HTTP::Get.new(uri)
       res = Net::HTTP.start(uri.host, uri.port,
-                             use_ssl: uri.scheme == "https",
-                             open_timeout: 3,
-                             read_timeout: 5) { |http| http.request(req) }
+                            use_ssl: uri.scheme == 'https',
+                            open_timeout: 3,
+                            read_timeout: 5) { |http| http.request(req) }
 
       raise "HTTP #{res.code}: #{res.body}" unless res.is_a?(Net::HTTPSuccess)
 
       data = res.body.to_s.empty? ? {} : JSON.parse(res.body)
-      models = Array(data["models"])
-      raise "no models found — run: ollama pull llama3.1" if models.empty?
+      models = Array(data['models'])
+      raise 'no models found — run: ollama pull llama3.1' if models.empty?
 
       models
         .map { |m| model_entry(m) }
@@ -54,15 +54,15 @@ class Provider
     end
 
     def manual_entry_hint
-      "model name (e.g. llama3.1, qwen2.5-coder)"
+      'model name (e.g. llama3.1, qwen2.5-coder)'
     end
 
     def base_url
-      env_or("OLLAMA_URL", "http://127.0.0.1:11434")
+      env_or('OLLAMA_URL', 'http://127.0.0.1:11434')
     end
 
     def server_hint
-      "start the server: ollama serve  ·  pull a model: ollama pull llama3.1"
+      'start the server: ollama serve  ·  pull a model: ollama pull llama3.1'
     end
 
     private
@@ -70,13 +70,13 @@ class Provider
     def model_entry(raw)
       return nil unless raw.is_a?(Hash)
 
-      name = raw["name"] || raw["model"]
+      name = raw['name'] || raw['model']
       return nil if name.nil? || name.to_s.empty?
 
-      details = raw["details"].is_a?(Hash) ? raw["details"] : {}
-      size = details["parameter_size"].to_s
-      family = details["family"].to_s
-      bits = [family, size].reject(&:empty?).join(" · ")
+      details = raw['details'].is_a?(Hash) ? raw['details'] : {}
+      size = details['parameter_size'].to_s
+      family = details['family'].to_s
+      bits = [family, size].reject(&:empty?).join(' · ')
       label = bits.empty? ? name.to_s : "#{name}  —  #{bits}"
 
       Model.new(id: name.to_s, label: label)
@@ -91,13 +91,13 @@ class OllamaProvider < OpenaiProvider
 
   def initialize(base_url:, model:, debug: false)
     @model = model
-    base = base_url.to_s.sub(%r{/+\z}, "")
+    base = base_url.to_s.sub(%r{/+\z}, '')
     @uri = URI("#{base}/v1/chat/completions")
     @log_handle = HTTP.open_log if debug
   end
 
   def label
-    "ollama"
+    'ollama'
   end
 
   private
@@ -106,19 +106,19 @@ class OllamaProvider < OpenaiProvider
     body = JSON.generate(
       model: @model,
       max_tokens: [MAX_TOKENS, MAX_OUT_TOKENS].min,
-      messages: [{ role: "system", content: active_system }] + messages,
+      messages: [{ role: 'system', content: active_system }] + messages,
       tools: openai_tool_schemas,
-      tool_choice: "auto"
+      tool_choice: 'auto'
     )
     headers = {
-      "Authorization" => "Bearer ollama",
-      "Content-Type"  => "application/json"
+      'Authorization' => 'Bearer ollama',
+      'Content-Type' => 'application/json'
     }
 
     res = HTTP.request(@uri, body: body, headers: headers, read_timeout: READ_TIMEOUT,
-                            log_label: "Ollama POST", log_handle: @log_handle)
+                             log_label: 'Ollama POST', log_handle: @log_handle)
     parse_response(res.body)
-  rescue => e
-    { "error" => { "message" => "#{e.class}: #{e.message}" } }
+  rescue StandardError => e
+    { 'error' => { 'message' => "#{e.class}: #{e.message}" } }
   end
 end

@@ -5,6 +5,6 @@
 # Run it from inside any project directory — the agent operates on the
 # current working directory (Dir.pwd).
 
-require "agent_cli"
+require 'agent_cli'
 
 AgentCli.start
