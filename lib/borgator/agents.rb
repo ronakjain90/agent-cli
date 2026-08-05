@@ -40,6 +40,9 @@ module Agents
     How to work:
     - For small or quick tasks, just use the tools yourself. To change an existing file, use
       `edit_file` with an exact snippet — reserve `write_file` for creating new files.
+    - Prefer `search_code` over grepping via `run_command`. Prefer `git_status` / `git_diff`
+      over shell git for read-only repo state. After edits, prefer `diagnostics` (when a
+      linter exists) before or alongside focused `run_tests`.
     - Emit independent tool calls together in ONE response — they run in parallel. Split them
       across responses only when a later call needs an earlier one's result.
     - For larger tasks, split the work into independent subtasks and `delegate` each one.
@@ -62,6 +65,8 @@ module Agents
     focused subtask by your manager. Use the tools to inspect and modify files and run commands.
     Prefer reading before writing. To change an existing file, use `edit_file` with an exact
     snippet copied verbatim from the file — do NOT rewrite the whole file with `write_file`.
+    Prefer `search_code` over shell grep, and `git_status`/`git_diff`/`diagnostics` over
+    reinventing those via `run_command`.
 
     Rules:
     - Stay strictly within your assigned subtask — do not expand the scope.
@@ -105,7 +110,7 @@ module Agents
 
   # Base tools every agent gets, plus `delegate` while below the depth cap.
   def tools_for(depth)
-    tools = Tools::DEFINITIONS.dup
+    tools = Tools.definitions.dup
     tools << DELEGATE_TOOL if depth < MAX_DEPTH
     tools
   end
@@ -135,7 +140,9 @@ module Agents
   # Snapshots of on-disk state, where a later call supersedes an earlier one.
   # Excludes run_command / run_tests: a run before a fix and one after it are
   # both meaningful.
-  IDEMPOTENT_READ_TOOLS = %w[read_file list_files].freeze
+  IDEMPOTENT_READ_TOOLS = %w[
+    read_file list_files search_code git_status git_diff diagnostics
+  ].freeze
 
   def estimate_tokens(messages)
     messages.sum { |msg| message_chars(msg) } / CHARS_PER_TOKEN

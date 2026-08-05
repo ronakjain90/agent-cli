@@ -166,7 +166,7 @@ class OpenaiProvider
   end
 
   def active_tools
-    Thread.current[:agent_active_tools] || Tools::DEFINITIONS
+    Thread.current[:agent_active_tools] || Tools.definitions
   end
 
   def openai_tool_schemas

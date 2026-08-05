@@ -20,11 +20,13 @@ module Borgator
   # Both are read lazily (Tools.shell_permitted?, Http.debug?), so this only has
   # to run before the TUI starts.
   #
-  #   --yolo  : skip all permission prompts for shell commands
-  #   --debug : log all provider API requests/responses to log/borgator-<timestamp>.log
+  #   --yolo       : skip all permission prompts for shell commands
+  #   --debug      : log all provider API requests/responses to log/borgator-<timestamp>.log
+  #   --web-fetch  : enable the web_fetch tool (off by default)
   def self.parse_flags!(argv = ARGV)
     ENV['AGENT_ALLOW_SHELL'] = '1' if argv.delete('--yolo')
     ENV['AGENT_DEBUG'] = '1' if argv.delete('--debug')
+    ENV['AGENT_ALLOW_WEB_FETCH'] = '1' if argv.delete('--web-fetch')
   end
 
   # Boot the TUI. Shared by the `borgator` executable and the dev entrypoint.
