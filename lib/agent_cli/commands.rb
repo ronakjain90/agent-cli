@@ -23,7 +23,7 @@ module Commands
     when "/providers"
       app.open_providers_picker
     when "/worker"
-      app.open_worker_picker
+      app.apply_worker_from_preferences
     when "/models"
       app.open_models_picker
     when "/init"

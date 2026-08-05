@@ -57,7 +57,6 @@ class AgentApp
     @api_key_input = ""
     @api_key_error = nil
     @picker_from_chat = false
-    @picker_target = :manager
     @pending_model_id = nil
     @models_picker_items = []
     @suggest_cursor = 0
@@ -182,7 +181,6 @@ class AgentApp
   end
 
   def open_providers_picker
-    @picker_target = :manager
     @picker_from_chat = true
     @input = ""
     @cursor_pos = 0
@@ -199,23 +197,55 @@ class AgentApp
     end
   end
 
-  # Choose which provider/model worker (sub-)agents should use.
-  def open_worker_picker
+  # Apply the configured worker provider/model from preferences without
+  # showing a picker. If no worker is configured, inform the user.
+  def apply_worker_from_preferences
     unless @provider
       @log << { kind: :error, text: "connect a provider first — type /providers" }
       return [self, nil]
     end
 
-    @picker_target = :worker
-    @picker_from_chat = true
-    @input = ""
-    @cursor_pos = 0
-    @suggest_cursor = 0
-    @mode = :pick_provider
-    @menu_cursor = provider_menu_index(current_worker_provider_id)
-    @menu_scroll = 0
-    @picker_error = nil
-    @selected_provider = nil
+    prefs = Preferences.load
+    unless prefs && prefs[:worker_model]
+      @log << { kind: :assistant, text: "no worker model configured — type /providers to set one" }
+      return [self, nil]
+    end
+
+    worker_provider_id = prefs[:worker_provider] || prefs[:provider]
+    worker_provider = Provider.find(worker_provider_id)
+    unless worker_provider
+      @log << { kind: :error, text: "configured worker provider #{worker_provider_id.inspect} not found" }
+      return [self, nil]
+    end
+
+    worker = worker_provider.build(prefs[:worker_model])
+    unless worker.respond_to?(:agent_run)
+      @log << { kind: :error, text: "#{worker_provider.label} can't run worker agents" }
+      return [self, nil]
+    end
+
+    if worker.label == @provider.label && worker.model_label == @provider.model_label
+      @provider.worker_provider = nil
+      Preferences.clear_worker
+      note = "Workers will use the manager model (#{@provider.model_label})."
+    else
+      @provider.worker_provider = worker
+      Preferences.save_worker(worker_provider_id, prefs[:worker_model])
+      same_prov = worker_provider.id == Provider.find(prefs[:provider])&.id
+      note = if same_prov
+               "Workers will use #{worker_provider.label} · #{worker.model_label}."
+             else
+               "Workers will use #{worker_provider.label} · #{worker.model_label} (#{worker_provider.label})."
+             end
+    end
+
+    @log << { kind: :assistant, text: note }
+    [self, nil]
+  rescue Settings::MissingApiKeyError => e
+    @log << { kind: :error, text: "worker model needs an API key — #{e.message}" }
+    [self, nil]
+  rescue => e
+    @log << { kind: :error, text: "failed to apply worker model: #{e.message}" }
     [self, nil]
   end
 
@@ -730,8 +760,6 @@ end
   end
 
   def activate_provider(model_id)
-    return activate_worker(model_id) if @picker_target == :worker
-
     @provider = @selected_provider.build(model_id)
     Preferences.save(@selected_provider.id, model_id)
     # Re-attach the saved worker provider to the freshly built manager.
@@ -767,55 +795,6 @@ end
     else
       reset_to_provider_picker
     end
-  end
-
-  # Attach (or clear) the provider/model that worker agents use. Does not reset
-  # the current conversation — only the manager provider owns the chat.
-  def activate_worker(model_id)
-    worker = @selected_provider.build(model_id)
-    unless worker.respond_to?(:agent_run)
-      @picker_error = "#{@selected_provider.label} can't run worker agents — pick another"
-      @mode = :pick_model
-      return [self, nil]
-    end
-
-    if @provider.respond_to?(:worker_provider=) &&
-       worker.label == @provider.label && worker.model_label == @provider.model_label
-      # Same as the manager → treat as "reset to manager model".
-      @provider.worker_provider = nil
-      Preferences.clear_worker
-      note = "Workers will use the manager model (#{@provider.model_label})."
-    else
-      @provider.worker_provider = worker if @provider.respond_to?(:worker_provider=)
-      Preferences.save_worker(@selected_provider.id, model_id)
-      note = "Workers will use #{worker.label} · #{worker.model_label}."
-    end
-
-    @mode = :chat
-    @picker_target = :manager
-    @picker_from_chat = false
-    @pending_model_id = nil
-    @api_key_input = ""
-    @api_key_error = nil
-    @picker_error = nil
-    @log << { kind: :assistant, text: note }
-    [self, nil]
-  rescue Settings::MissingApiKeyError => e
-    @pending_model_id = model_id
-    @mode = :enter_api_key
-    @api_key_input = ""
-    @api_key_error = nil
-    @picker_error = nil
-    [self, nil]
-  rescue => e
-    @picker_error = e.message
-    @mode = :pick_model
-    [self, nil]
-  end
-
-  def current_worker_provider_id
-    prefs = Preferences.load
-    prefs && (prefs[:worker_provider] || prefs[:provider])
   end
 
   def update_api_key_entry(message)
@@ -1023,7 +1002,6 @@ end
   def cancel_picker_to_chat
     @mode = :chat
     @picker_from_chat = false
-    @picker_target = :manager
     @selected_provider = nil
     @model_items = []
     @menu_cursor = 0
@@ -1410,16 +1388,11 @@ end
   end
 
   def picker_title
-    worker = @picker_target == :worker
     case @mode
     when :pick_provider
-      worker ? "Select worker provider:" : "Select provider:"
+      "Select provider:"
     when :pick_model
-      if worker
-        "Select worker model#{@selected_provider ? " (#{@selected_provider.label})" : ""}:"
-      else
-        @selected_provider&.model_picker_title || "Select model:"
-      end
+      @selected_provider&.model_picker_title || "Select model:"
     else ""
     end
   end
