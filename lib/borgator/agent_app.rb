@@ -11,6 +11,7 @@ require_relative 'usage'
 require_relative 'commands'
 require_relative 'constants'
 require_relative 'agents_guard'
+require_relative 'ui'
 
 class Poll < Bubbletea::Message; end
 
@@ -72,6 +73,9 @@ class AgentApp
     @pending_permission = nil
     @pending_init = false
     @init_assistant_text = nil
+
+    # Start of the current turn; the chomp animation is sampled from it.
+    @thinking_since = nil
 
     @you    = Lipgloss::Style.new.bold(true).foreground('#7D56F4')
     @bot    = Lipgloss::Style.new
@@ -143,7 +147,7 @@ class AgentApp
 
     when Poll
       drain_events
-      @frame = (@frame + 1) % SPINNER.length if @thinking || @models_loading || @mode == :permission
+      @frame = (@frame + 1) % SPINNER.length if @models_loading
       [self, tick]
 
     when Bubbletea::KeyMessage
@@ -429,7 +433,7 @@ class AgentApp
               { kind: :assistant, text: 'Analyzing project to generate AGENTS.md…' }
             end
 
-    @thinking = true
+    start_thinking!
     @input = ''
     @cursor_pos = 0
 
@@ -1209,12 +1213,21 @@ class AgentApp
     end
   end
 
+  # The eye + mouth shown while a turn is running. The mouth is derived from
+  # how long the turn has been going, so this is safe to call every frame.
+  def prompt_glyph
+    Borgator::UI::Glyph.prompt(
+      state: @thinking ? :thinking : :idle,
+      mouth: Borgator::UI::Chomp.mouth(@thinking_since)
+    )
+  end
+
   # Gray box with purple left edge: input row + Borgator · model · provider.
   def composer_lines
     width = [@width, 40].max
     input =
       if @thinking
-        @composer_dim_bg.render("#{SPINNER[@frame]} thinking…")
+        @composer_dim_bg.render("#{prompt_glyph} thinking…")
       else
         ghost = input_ghost_suffix
         placeholder =
@@ -1249,7 +1262,7 @@ class AgentApp
   def status_bar_line
     left =
       if @thinking
-        @composer_dim.render("#{SPINNER[@frame]}······  esc interrupt")
+        @composer_dim.render("#{prompt_glyph}······  esc interrupt")
       else
         ''
       end
@@ -1553,7 +1566,7 @@ class AgentApp
     @messages << { 'role' => 'user', 'content' => text }
     @input = ''
     @cursor_pos = 0
-    @thinking = true
+    start_thinking!
     @diffs = []
     @diff_cursor = -1
 
@@ -1573,6 +1586,13 @@ class AgentApp
 
   def tick
     Bubbletea.tick(TICK_INTERVAL) { Poll.new }
+  end
+
+  # Enter the thinking state, stamping the clock the prompt glyph animates
+  # against. Both are set here so they cannot drift apart.
+  def start_thinking!
+    @thinking = true
+    @thinking_since = Borgator::UI::Chomp.now_ms
   end
 
   def drain_events
