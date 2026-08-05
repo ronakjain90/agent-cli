@@ -1,0 +1,62 @@
+AllCops:
+  TargetRubyVersion: 3.1
+  NewCops: enable
+  Exclude:
+    - 'vendor/**/*'
+    - '.bundle/**/*'
+
+Style/Documentation:
+  Enabled: false
+
+Lint/MissingSuper:
+  Enabled: false
+
+Style/OneClassPerFile:
+  Enabled: false
+
+Naming/PredicateMethod:
+  Enabled: false
+
+Layout/LineLength:
+  Max: 120
+
+Naming/MethodParameterName:
+  AllowedNames:
+    - a
+    - b
+    - i
+    - n
+    - s
+    - x
+    - y
+    - k
+    - v
+    - id
+    - to
+
+Metrics/AbcSize:
+  Max: 100
+
+Metrics/BlockLength:
+  Max: 40
+
+Metrics/BlockNesting:
+  Max: 5
+
+Metrics/ClassLength:
+  Max: 1300
+
+Metrics/CyclomaticComplexity:
+  Max: 40
+
+Metrics/MethodLength:
+  Max: 100
+
+Metrics/ModuleLength:
+  Max: 450
+
+Metrics/ParameterLists:
+  Max: 8
+
+Metrics/PerceivedComplexity:
+  Max: 40
