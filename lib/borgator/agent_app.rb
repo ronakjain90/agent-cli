@@ -70,6 +70,8 @@ class AgentApp
     @usage = Usage.blank
     @context_tokens = 0
     @pending_permission = nil
+    @pending_init = false
+    @init_assistant_text = nil
 
     @you    = Lipgloss::Style.new.bold(true).foreground('#7D56F4')
     @bot    = Lipgloss::Style.new
@@ -202,11 +204,31 @@ class AgentApp
     @mode = :models_picker
     @menu_cursor = 0
     @menu_scroll = 0
+    @models_picker_confirming_delete = false
+    @picking_worker_model = false
     [self, nil]
   end
 
   def update_models_picker(message)
-    update_list_picker(message, @models_picker_items) { confirm_model_set }
+    if @models_picker_confirming_delete
+      return confirm_delete_commit(message)
+    end
+
+    if message.esc?
+      @mode = :chat
+      @models_picker_items = []
+      [self, nil]
+    elsif message.up? || message.to_s == 'k'
+      move_list_cursor(-1, @models_picker_items)
+    elsif message.down? || message.to_s == 'j'
+      move_list_cursor(1, @models_picker_items)
+    elsif message.enter?
+      confirm_model_set
+    elsif message.to_s == 'd'
+      confirm_delete_model_set
+    else
+      [self, nil]
+    end
   end
 
   # Key handling shared by the flat list pickers (/models, /worker): the caller
@@ -279,7 +301,37 @@ class AgentApp
 
     @mode = :chat
     @models_picker_items = []
+    @models_picker_confirming_delete = false
     @log << ready_message
+    [self, nil]
+  end
+
+  # Toggle into confirmation mode for the currently-selected model set.
+  def confirm_delete_model_set
+    return [self, nil] if @models_picker_confirming_delete
+
+    @models_picker_confirming_delete = true
+    [self, nil]
+  end
+
+  # Commit or cancel the pending deletion on y/n.
+  def confirm_delete_commit(message)
+    item = @models_picker_items[@menu_cursor]
+    @models_picker_confirming_delete = false
+    return [self, nil] unless item
+
+    if message.to_s == 'y' || message.enter? || message.to_s == 'Y'
+      name = item['name']
+      if Preferences.delete_model_set(name)
+        @models_picker_items.delete_at(@menu_cursor)
+        @menu_cursor = @menu_cursor.clamp(0, [@models_picker_items.length - 1, 0].max)
+        @log << { kind: :tool_result, text: "  deleted model set \"#{name}\"" }
+      else
+        @log << { kind: :error, text: "  failed to delete \"#{name}\"" }
+      end
+    else
+      @log << { kind: :tool_result, text: '  delete cancelled' }
+    end
     [self, nil]
   end
 
@@ -290,6 +342,15 @@ class AgentApp
       lines << @hint.render('  no saved models  -  configure one with /providers')
       lines << ''
       lines << @hint.render('  esc back to chat | ctrl+c quit')
+      return lines.join("\n")
+    end
+
+    if @models_picker_confirming_delete
+      item = @models_picker_items[@menu_cursor]
+      name = item ? item['name'] : '???'
+      lines << @warn.render("  Delete model set \"#{name}\"?  This cannot be undone.")
+      lines << ''
+      lines << @hint.render('  y delete | n/esc keep | ctrl+c quit')
       return lines.join("\n")
     end
 
@@ -323,7 +384,7 @@ class AgentApp
     end
 
     lines << ''
-    lines << @hint.render('up/down move | enter apply | esc back | ctrl+c quit')
+    lines << @hint.render('up/down move | enter apply | d delete | esc back | ctrl+c quit')
     lines.join("\n")
   end
 
@@ -728,25 +789,43 @@ class AgentApp
 
   def activate_provider(model_id)
     @provider = @selected_provider.build(model_id)
-    Preferences.save(@selected_provider.id, model_id)
-    # Re-attach the saved worker provider to the freshly built manager.
-    Provider.attach_worker(@provider, @selected_provider.id)
-    was_chat = @picker_from_chat
-    @mode = :chat
-    @picker_from_chat = false
-    @pending_model_id = nil
-    @api_key_input = ''
-    @api_key_error = nil
-    @messages = []
-    @usage = Usage.blank
-    @context_tokens = 0
-    @picker_error = nil
-    @log << ready_message
-    unless was_chat
-      @log << { kind: :assistant, text: 'Ask me to read, write, or run something. Type /providers to switch.' }
+    if @picking_worker_model
+      Provider.attach_worker(@provider, @selected_provider.id)
+      Preferences.save_worker(@selected_provider.id, model_id)
+      was_chat = @picker_from_chat
+      @mode = :chat
+      @picker_from_chat = false
+      @picking_worker_model = false
+      @pending_model_id = nil
+      @api_key_input = ''
+      @api_key_error = nil
+      @picker_error = nil
+      @log << ready_message
+      @log << { kind: :assistant, text: "Workers will use #{@selected_provider.label} · #{model_id}." }
+      offer_save_model_set
+      [self, nil]
+    else
+      Preferences.save(@selected_provider.id, model_id)
+      # Re-attach the saved worker provider to the freshly built manager.
+      Provider.attach_worker(@provider, @selected_provider.id)
+      was_chat = @picker_from_chat
+      @mode = :chat
+      @picker_from_chat = false
+      @picking_worker_model = false
+      @pending_model_id = nil
+      @api_key_input = ''
+      @api_key_error = nil
+      @messages = []
+      @usage = Usage.blank
+      @context_tokens = 0
+      @picker_error = nil
+      @log << ready_message
+      unless was_chat
+        @log << { kind: :assistant, text: 'Ask me to read, write, or run something. Type /providers to switch.' }
+      end
+      offer_save_model_set
+      [self, nil]
     end
-    offer_save_model_set
-    [self, nil]
   rescue Settings::MissingApiKeyError
     @pending_model_id = model_id
     @mode = :enter_api_key
@@ -1445,21 +1524,22 @@ class AgentApp
 
     remember_prompt(text)
 
-    if text.start_with?('/') && !text.include?(' ')
-      matches = Commands.matching(text)
+    if text.start_with?('/')
+      cmd_name, arg = parse_slash_command(text)
+      matches = Commands.matching(cmd_name)
       if matches.empty?
-        @log << { kind: :error, text: "unknown command #{text.inspect} — type /help" }
+        @log << { kind: :error, text: "unknown command #{cmd_name.inspect} — type /help" }
         @input = ''
         @cursor_pos = 0
         @suggest_cursor = 0
         return [self, nil]
       end
 
-      chosen = matches.find { |cmd| cmd[:name] == text } || matches[@suggest_cursor] || matches.first
+      chosen = matches.find { |cmd| cmd[:name] == cmd_name } || matches[@suggest_cursor] || matches.first
       @input = ''
       @cursor_pos = 0
       @suggest_cursor = 0
-      return Commands.run(chosen[:name], self)
+      return Commands.run(chosen[:name], self, arg)
     end
 
     unless @provider
@@ -1484,6 +1564,13 @@ class AgentApp
     [self, tick]
   end
 
+  # Split a slash command input into the command name (first whitespace-delimited
+  # token, e.g. "/init") and the remaining text (everything after, stripped).
+  def parse_slash_command(text)
+    parts = text.strip.split(/\s+/, 2)
+    [parts[0].downcase, parts[1] || '']
+  end
+
   def tick
     Bubbletea.tick(TICK_INTERVAL) { Poll.new }
   end
@@ -1501,10 +1588,17 @@ class AgentApp
         # If we were generating AGENTS.md, capture the assistant response and write it
         if @pending_init
           @pending_init = false
-          # Find the last assistant message (the LLM's response)
-          assistant_msg = @log.reverse.find { |e| e[:kind] == :assistant && e != @log[-2] }
-          if assistant_msg && assistant_msg[:text]
-            content = sanitize_agents_content(assistant_msg[:text])
+          # Capture the assistant summary from the init turn. We track it via
+          # @init_assistant_text (set in the else branch below), falling back
+          # to a log scan for older sessions.
+          assistant_text = @init_assistant_text
+          @init_assistant_text = nil
+          if assistant_text.nil?
+            assistant_msg = @log.reverse.find { |e| e[:kind] == :assistant && e[:text] }
+            assistant_text = assistant_msg[:text] if assistant_msg
+          end
+          if assistant_text && !assistant_text.strip.empty?
+            content = sanitize_agents_content(assistant_text)
             # If CLAUDE.md existed, prepend a reference to it
             content = "@CLAUDE.md\n\n#{content}" if @claude_path_existed
             # Refuse unsafe content: AGENTS.md is auto-loaded into every session.
@@ -1532,6 +1626,9 @@ class AgentApp
         @log << { kind: :tool_result, text: "  needs permission: #{ev[:detail]}" }
       else
         @log << ev
+        if ev[:kind] == :assistant && @pending_init
+          @init_assistant_text = ev[:text].to_s
+        end
         if ev[:diff]
           @diffs << ev[:diff]
           @diff_cursor = @diffs.length - 1

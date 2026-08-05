@@ -27,7 +27,19 @@ module Commands
     end
 
     def update_worker_picker(message)
-      update_list_picker(message, @worker_picker_items) { confirm_worker_selection }
+      if message.esc?
+        @mode = :chat
+        @worker_picker_items = []
+        [self, nil]
+      elsif message.up? || message.to_s == 'k'
+        move_list_cursor(-1, @worker_picker_items)
+      elsif message.down? || message.to_s == 'j'
+        move_list_cursor(1, @worker_picker_items)
+      elsif message.enter?
+        confirm_worker_selection
+      else
+        [self, nil]
+      end
     end
 
     def view_worker_picker
@@ -47,6 +59,8 @@ module Commands
         if entry[:manager]
           text = "manager model  —  #{@provider.label}:#{@provider.model_label}"
           text << '  · current' if current.nil?
+        elsif entry[:add_new]
+          text = entry[:label]
         else
           text = "#{entry[:label]}:#{entry[:model]}"
           text << "  (#{entry[:name]})" if entry[:name]
@@ -64,8 +78,8 @@ module Commands
     private
 
     # Configured pairs — canonicalised through Provider so aliases collapse into
-    # one row — minus the manager's own pair, plus a "use the manager model"
-    # entry that clears the override.
+    # one row — plus a "use the manager model" entry that clears the override.
+    # If no pairs exist, also offer a "pick a new model" entry.
     def worker_picker_entries
       pairs = Preferences.configured_pairs.filter_map do |pair|
         meta = Provider.find(pair[:provider])
@@ -74,7 +88,10 @@ module Commands
         pair.merge(provider: meta.id.to_s, label: meta.label)
       end
 
-      pairs.uniq { |pair| [pair[:provider], pair[:model]] } + [{ manager: true }]
+      pairs.uniq { |pair| [pair[:provider], pair[:model]] }.tap do |result|
+        result.unshift({ add_new: true, label: 'add a worker model…' }) if pairs.empty?
+        result << { manager: true }
+      end
     end
 
     def same_worker_target?(pair, target)
@@ -99,7 +116,15 @@ module Commands
       @mode = :chat
       @worker_picker_items = []
 
-      item[:manager] ? use_manager_model : apply_worker(item[:provider], item[:model])
+      if item[:manager]
+        use_manager_model
+      elsif item[:add_new]
+        # Open the provider picker to configure a brand-new worker model.
+        @picking_worker_model = true
+        open_providers_picker
+      else
+        apply_worker(item[:provider], item[:model])
+      end
     end
 
     def use_manager_model

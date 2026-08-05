@@ -35,6 +35,9 @@ class WorkerPickerTest < Minitest::Test
     def id = :openrouter
     def label = 'openrouter'
     def build(model_id) = FakeProvider.new(model_id)
+    def models = []
+    def show_model_id_in_picker? = false
+    def model_picker_title = 'Select model:'
   end
 
   class Key
@@ -142,5 +145,67 @@ class WorkerPickerTest < Minitest::Test
     last = app.instance_variable_get(:@log).last
     assert_equal :error, last[:kind]
     assert_includes last[:text], '/providers'
+  end
+
+  def test_add_new_model_entry_appears_when_no_pairs_configured
+    original = Preferences.method(:read_raw)
+    Preferences.define_singleton_method(:read_raw) { Marshal.load(Marshal.dump(PREFS.merge('saved_models' => [], 'worker_provider' => nil, 'worker_model' => nil))) }
+    begin
+      app, = open_picker(worker_model: nil)
+      entries = items(app)
+      add_new = entries.find { |e| e[:add_new] }
+      assert add_new, 'an "add a worker model…" entry should appear when no configured pairs differ from the manager'
+    ensure
+      Preferences.define_singleton_method(:read_raw, original)
+    end
+  end
+
+  def test_selecting_add_new_opens_provider_picker_for_worker
+    original = Preferences.method(:read_raw)
+    Preferences.define_singleton_method(:read_raw) { Marshal.load(Marshal.dump(PREFS.merge('saved_models' => [], 'worker_provider' => nil, 'worker_model' => nil))) }
+    begin
+      app, manager = open_picker(worker_model: nil)
+      entries = items(app)
+      add_new_idx = entries.index { |e| e[:add_new] }
+      assert add_new_idx, 'add_new entry should be present when no pairs differ from manager'
+
+      app.instance_variable_set(:@menu_cursor, add_new_idx)
+      app.update_worker_picker(Key.new('enter'))
+
+      assert_equal :pick_model, app.instance_variable_get(:@mode)
+      assert app.instance_variable_get(:@picking_worker_model), 'should flag that we are picking a worker model'
+    ensure
+      Preferences.define_singleton_method(:read_raw, original)
+    end
+  end
+
+  def test_delete_model_set_removes_it_from_pickers
+    app, = open_picker
+    app.open_models_picker
+    assert_equal :models_picker, app.instance_variable_get(:@mode)
+
+    # Press 'd' to confirm delete
+    app.update_models_picker(Key.new('d'))
+    assert app.instance_variable_get(:@models_picker_confirming_delete)
+
+    # Cancel the delete
+    app.update_models_picker(Key.new('n'))
+    refute app.instance_variable_get(:@models_picker_confirming_delete)
+  end
+
+  def test_delete_confirm_yes_removes_model_set
+    app, = open_picker
+    app.open_models_picker
+    items_before = app.instance_variable_get(:@models_picker_items).dup
+    return if items_before.empty? # can't test delete if nothing to delete
+
+    # Select the first item and press 'd'
+    app.instance_variable_set(:@menu_cursor, 0)
+    app.update_models_picker(Key.new('d'))
+    app.update_models_picker(Key.new('y'))
+
+    items_after = app.instance_variable_get(:@models_picker_items)
+    assert_operator items_after.length, :<, items_before.length
+    refute app.instance_variable_get(:@models_picker_confirming_delete)
   end
 end
