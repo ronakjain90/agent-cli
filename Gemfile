@@ -4,3 +4,7 @@ source "https://rubygems.org"
 
 # Runtime dependencies come from the gemspec.
 gemspec
+
+group :test do
+  gem 'minitest'
+end
