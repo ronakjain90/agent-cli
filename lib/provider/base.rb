@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require_relative '../agent_cli/model'
-require_relative '../agent_cli/preferences'
-require_relative '../agent_cli/settings'
+require_relative '../borgator/model'
+require_relative '../borgator/preferences'
+require_relative '../borgator/settings'
 
 # Metadata + factory for each provider kind.
 class Provider

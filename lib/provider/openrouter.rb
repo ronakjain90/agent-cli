@@ -4,9 +4,9 @@ require 'json'
 require 'net/http'
 require 'uri'
 
-require_relative '../agent_cli/constants'
-require_relative '../agent_cli/tools'
-require_relative '../agent_cli/settings'
+require_relative '../borgator/constants'
+require_relative '../borgator/tools'
+require_relative '../borgator/settings'
 require_relative 'base'
 require_relative 'openai'
 
@@ -60,8 +60,8 @@ class OpenrouterProvider < OpenaiProvider
     @api_key = Settings.sanitize_api_key(api_key)
     @model   = model
     @uri     = URI(ENDPOINT)
-    @site_url  = env_blank('OPENROUTER_SITE_URL', 'https://github.com/local/agent-cli')
-    @site_name = env_blank('OPENROUTER_SITE_NAME', 'agent-cli')
+    @site_url  = env_blank('OPENROUTER_SITE_URL', 'https://github.com/ronakjain90/borgator')
+    @site_name = env_blank('OPENROUTER_SITE_NAME', 'borgator')
     @log_handle = HTTP.open_log if debug
   end
 

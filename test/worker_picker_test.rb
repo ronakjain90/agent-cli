@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
-require_relative '../lib/agent_cli'
+require_relative '../lib/borgator'
 
 # /worker shows the provider+model pairs the user already configured and lets
 # them pick one, instead of silently re-applying whatever is in preferences.

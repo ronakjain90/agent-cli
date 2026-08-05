@@ -15,54 +15,54 @@
 #     * opencode   — local OpenCode server (`opencode serve`)
 #
 #   Multi-agent: the top-level agent runs as a *manager* with a `delegate` tool
-#   that hands focused subtasks to fresh *worker* agents (see lib/agent_cli/agents.rb).
+#   that hands focused subtasks to fresh *worker* agents (see lib/borgator/agents.rb).
 #   Worker activity is shown indented in the chat log. Type /agents for details.
 #   (Works on anthropic / openai / openrouter / google / groq / ollama providers.)
 #
 #   Give workers a cheaper/faster model (or a different provider) with /worker, or:
-#     AGENT_WORKER_MODEL=claude-haiku-4-5 ruby agent-cli.rb
-#     AGENT_WORKER_PROVIDER=groq AGENT_WORKER_MODEL=llama-3.3-70b-versatile ruby agent-cli.rb
+#     AGENT_WORKER_MODEL=claude-haiku-4-5 ruby borgator.rb
+#     AGENT_WORKER_PROVIDER=groq AGENT_WORKER_MODEL=llama-3.3-70b-versatile ruby borgator.rb
 #
 # Setup:
 #   gem install bubbletea lipgloss
 #
-#   ruby agent-cli.rb
+#   ruby borgator.rb
 #   # Type /providers to connect and pick a model (remembers your last choice).
 #
 #   # Skip the picker with env vars:
 #   export ANTHROPIC_API_KEY=sk-ant-...
-#   AGENT_PROVIDER=anthropic AGENT_MODEL=claude-opus-4-8 ruby agent-cli.rb
+#   AGENT_PROVIDER=anthropic AGENT_MODEL=claude-opus-4-8 ruby borgator.rb
 #
-#   # API keys: env vars still work, or enter them in the TUI (saved to ~/.agent-cli/settings.json)
+#   # API keys: env vars still work, or enter them in the TUI (saved to ~/.borgator/settings.json)
 #   export OPENROUTER_API_KEY=sk-or-...
-#   AGENT_PROVIDER=openrouter AGENT_MODEL=openai/gpt-oss-20b:free ruby agent-cli.rb
+#   AGENT_PROVIDER=openrouter AGENT_MODEL=openai/gpt-oss-20b:free ruby borgator.rb
 #
 #   export GEMINI_API_KEY=...
-#   AGENT_PROVIDER=google AGENT_MODEL=gemini-3.6-flash ruby agent-cli.rb
+#   AGENT_PROVIDER=google AGENT_MODEL=gemini-3.6-flash ruby borgator.rb
 #
 #   export GROQ_API_KEY=...
-#   AGENT_PROVIDER=groq AGENT_MODEL=llama-3.3-70b-versatile ruby agent-cli.rb
+#   AGENT_PROVIDER=groq AGENT_MODEL=llama-3.3-70b-versatile ruby borgator.rb
 #
 #   ollama serve
 #   ollama pull llama3.1
-#   AGENT_PROVIDER=ollama AGENT_MODEL=llama3.1 ruby agent-cli.rb
+#   AGENT_PROVIDER=ollama AGENT_MODEL=llama3.1 ruby borgator.rb
 #
 #   opencode serve --port 4096
-#   AGENT_PROVIDER=opencode AGENT_MODEL=anthropic/claude-opus-4-8 ruby agent-cli.rb
+#   AGENT_PROVIDER=opencode AGENT_MODEL=anthropic/claude-opus-4-8 ruby borgator.rb
 #
 # Shell execution (anthropic / openai / openrouter / google / groq / ollama) asks for permission
 # by default (y once · a session · p permanently · n deny). Read-only git commands
 # (git status/log/diff/…) are always allowed. Skip all prompts with:
-#   ruby agent-cli.rb --yolo
+#   ruby borgator.rb --yolo
 #
-# Debug mode logs every provider API request/response to log/agent-cli-<timestamp>.log:
-#   ruby agent-cli.rb --debug
+# Debug mode logs every provider API request/response to log/borgator-<timestamp>.log:
+#   ruby borgator.rb --debug
 #
 # Keys (chat):  type a request, Enter to send · /providers to switch · ctrl+c quit
 # Keys (picker): ↑/↓ move · enter select · esc back · ctrl+c quit
 # Keys (permission): y/enter allow once · a allow session · p allow permanently · n/esc deny · esc back · ctrl+c quit
 
 $LOAD_PATH.unshift File.expand_path('lib', __dir__)
-require 'agent_cli'
+require 'borgator'
 
-AgentCli.start
+Borgator.start

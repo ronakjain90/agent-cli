@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
-require_relative '../lib/agent_cli/agents'
+require_relative '../lib/borgator/agents'
 
 class DedupeStaleResultsTest < Minitest::Test
   def openai_call(id, name, args)

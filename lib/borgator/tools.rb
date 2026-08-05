@@ -509,7 +509,7 @@ module Tools
               'could not detect a test command for this project. Pass `runner` explicitly ' \
               '(e.g. "bin/rails test", "bundle exec rspec", or "pytest"), set the ' \
               'AGENT_TEST_COMMAND environment variable, or add a "test_command" to the ' \
-              'agent-cli preferences file.'
+              'borgator preferences file.'
       end
       run_command(apply_test_path(base, input['path']), skip_permission: true)
     end

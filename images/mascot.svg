@@ -1,0 +1,57 @@
+<svg width="100%" viewBox="0 0 680 410" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width: 460px; display: block; margin-inline: auto;"><title>Borgator mascot: a cyborg alligator head in profile</title><desc>An alligator head facing right, drawn in profile. The rear half of its skull is covered by a riveted metal plate, and its eye has been replaced by a circular red ocular implant. A short sensor antenna rises from the top of the skull. Interlocking teeth line the open jaws.</desc>
+
+  <path d="M 150 390 C 148 322, 176 268, 226 244 L 332 250 L 348 390 Z" fill="#2e5f3b"></path>
+  <circle cx="196" cy="318" r="7" fill="#26512f"></circle><circle cx="228" cy="336" r="7" fill="#26512f"></circle><circle cx="262" cy="322" r="7" fill="#26512f"></circle><circle cx="212" cy="366" r="7" fill="#26512f"></circle><circle cx="252" cy="376" r="7" fill="#26512f"></circle><circle cx="292" cy="352" r="7" fill="#26512f"></circle>
+  <path d="M 296 262 L 342 262 L 352 390 L 306 390 Z" fill="#8c97a3"></path>
+  <path d="M 296 300 L 346 300 L 348 314 L 298 314 Z" fill="#b9c2cb"></path>
+  <path d="M 300 344 L 350 344 L 352 358 L 302 358 Z" fill="#b9c2cb"></path>
+
+  <path d="M 200 262 C 188 210, 218 172, 268 166 C 310 161, 352 172, 388 189 C 442 213, 498 234, 534 248 L 534 264 L 200 264 Z" fill="#3f7d4e"></path>
+  <rect x="208" y="258" width="328" height="30" fill="#241f1c"></rect>
+  <path d="M 206 284 L 534 284 C 514 306, 442 318, 360 316 C 284 314, 226 302, 206 290 Z" fill="#4a8f5b"></path>
+  <path d="M 232 292 C 280 306, 340 312, 400 312 L 400 316 C 336 316, 278 310, 226 298 Z" fill="#7fb08a"></path>
+
+  <ellipse cx="418" cy="214" rx="13" ry="6" fill="#2e5f3b"></ellipse>
+  <ellipse cx="452" cy="228" rx="12" ry="6" fill="#2e5f3b"></ellipse>
+  <ellipse cx="486" cy="242" rx="11" ry="5" fill="#2e5f3b"></ellipse>
+  <ellipse cx="514" cy="252" rx="8" ry="4" fill="#241f1c"></ellipse>
+
+  <path d="M 248 264 L 264 264 L 256 282 Z" fill="#f2efe6"></path>
+  <path d="M 288 264 L 304 264 L 296 283 Z" fill="#f2efe6"></path>
+  <path d="M 328 264 L 344 264 L 336 282 Z" fill="#f2efe6"></path>
+  <path d="M 368 264 L 384 264 L 376 283 Z" fill="#f2efe6"></path>
+  <path d="M 408 264 L 424 264 L 416 281 Z" fill="#f2efe6"></path>
+  <path d="M 448 264 L 463 264 L 456 280 Z" fill="#f2efe6"></path>
+  <path d="M 486 264 L 500 264 L 493 279 Z" fill="#f2efe6"></path>
+  <path d="M 268 288 L 281 288 L 275 270 Z" fill="#f2efe6"></path>
+  <path d="M 308 289 L 321 289 L 315 270 Z" fill="#f2efe6"></path>
+  <path d="M 348 290 L 361 290 L 355 271 Z" fill="#f2efe6"></path>
+  <path d="M 388 290 L 401 290 L 395 272 Z" fill="#f2efe6"></path>
+  <path d="M 428 289 L 440 289 L 434 273 Z" fill="#f2efe6"></path>
+  <path d="M 466 287 L 477 287 L 472 274 Z" fill="#f2efe6"></path>
+  <path d="M 502 284 L 512 284 L 508 274 Z" fill="#cfd4c6"></path>
+
+  <path d="M 210 288 L 272 288 L 264 314 C 238 308, 219 298, 210 292 Z" fill="#8c97a3"></path>
+  <path d="M 222 294 L 258 294 L 255 302 L 228 300 Z" fill="#b9c2cb"></path>
+
+  <path d="M 200 262 C 188 210, 218 172, 268 166 C 302 161, 334 169, 360 180 L 336 262 Z" fill="#b9c2cb"></path>
+  <path d="M 360 180 L 336 262" stroke="#6f7b87" stroke-width="4" fill="none" stroke-linecap="round"></path>
+  <path d="M 200 262 C 188 210, 218 172, 268 166" stroke="#dfe5ea" stroke-width="4" fill="none" stroke-linecap="round"></path>
+  <path d="M 228 226 L 252 226 L 252 206 L 274 206" stroke="#6f7b87" stroke-width="1.5" fill="none" stroke-linecap="round"></path>
+  <path d="M 296 248 L 296 232 L 318 232" stroke="#6f7b87" stroke-width="1.5" fill="none" stroke-linecap="round"></path>
+  <path d="M 240 190 L 258 190" stroke="#6f7b87" stroke-width="1.5" fill="none" stroke-linecap="round"></path>
+  <circle cx="222" cy="248" r="4" fill="#6f7b87"></circle><circle cx="252" cy="252" r="4" fill="#6f7b87"></circle><circle cx="234" cy="196" r="4" fill="#6f7b87"></circle><circle cx="272" cy="182" r="4" fill="#6f7b87"></circle><circle cx="308" cy="188" r="4" fill="#6f7b87"></circle><circle cx="322" cy="248" r="4" fill="#6f7b87"></circle>
+
+  <rect x="252" y="140" width="9" height="30" rx="3" fill="#8c97a3"></rect>
+  <circle cx="256" cy="136" r="8" fill="#e2574c"></circle>
+  <circle cx="256" cy="136" r="3" fill="#f3b0a6"></circle>
+
+  <circle cx="320" cy="206" r="30" fill="#6f7b87"></circle>
+  <circle cx="320" cy="206" r="24" fill="#dfe5ea"></circle>
+  <circle cx="320" cy="206" r="18" fill="#e2574c"></circle>
+  <circle cx="320" cy="206" r="9" fill="#8f2c22"></circle>
+  <circle cx="314" cy="199" r="4" fill="#f3b0a6"></circle>
+  <path d="M 320 176 L 320 168" stroke="#6f7b87" stroke-width="3" fill="none" stroke-linecap="round"></path>
+  <path d="M 350 206 L 358 206" stroke="#6f7b87" stroke-width="3" fill="none" stroke-linecap="round"></path>
+  <path d="M 320 236 L 320 244" stroke="#6f7b87" stroke-width="3" fill="none" stroke-linecap="round"></path>
+</svg>

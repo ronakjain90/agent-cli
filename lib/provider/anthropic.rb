@@ -4,10 +4,10 @@ require 'json'
 require 'net/http'
 require 'uri'
 
-require_relative '../agent_cli/constants'
-require_relative '../agent_cli/tools'
-require_relative '../agent_cli/agents'
-require_relative '../agent_cli/usage'
+require_relative '../borgator/constants'
+require_relative '../borgator/tools'
+require_relative '../borgator/agents'
+require_relative '../borgator/usage'
 require_relative 'base'
 
 class Provider

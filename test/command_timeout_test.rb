@@ -2,7 +2,7 @@
 
 require 'minitest/autorun'
 require 'tmpdir'
-require_relative '../lib/agent_cli/tools'
+require_relative '../lib/borgator/tools'
 
 class CommandTimeoutTest < Minitest::Test
   def with_timeout(seconds)

@@ -4,9 +4,9 @@ require 'json'
 require 'net/http'
 require 'uri'
 
-require_relative '../agent_cli/constants'
-require_relative '../agent_cli/tools'
-require_relative '../agent_cli/settings'
+require_relative '../borgator/constants'
+require_relative '../borgator/tools'
+require_relative '../borgator/settings'
 require_relative 'base'
 require_relative 'openai'
 

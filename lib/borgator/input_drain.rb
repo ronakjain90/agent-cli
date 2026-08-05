@@ -5,7 +5,7 @@ require 'open3'
 # Bubbletea's Program#poll_event only parses the first key from each raw read and
 # discards the rest — so clipboard pastes become 1–2 characters. This patch drains
 # the full buffer into a queue of key events.
-module AgentCli
+module Borgator
   module InputDrain
     KEY_RUNES     = -1
     KEY_ESC       = 27
@@ -36,11 +36,11 @@ module AgentCli
       return if defined?(@patched) && @patched
 
       Bubbletea::Program.class_eval do
-        alias_method :__agent_cli_poll_event_orig, :poll_event
+        alias_method :__borgator_poll_event_orig, :poll_event
 
         def poll_event(timeout_ms)
-          @__agent_cli_event_q ||= []
-          return @__agent_cli_event_q.shift unless @__agent_cli_event_q.empty?
+          @__borgator_event_q ||= []
+          return @__borgator_event_q.shift unless @__borgator_event_q.empty?
 
           raw = read_raw_input(timeout_ms)
           return nil if raw.nil? || raw.empty?
@@ -49,15 +49,15 @@ module AgentCli
           # A bracketed paste can span multiple reads: the opening ESC[200~ arrives
           # without its closing ESC[201~. Keep reading until the terminator lands so
           # the paste isn't split mid-marker (which would leak "[200~" into the input).
-          while AgentCli::InputDrain.unclosed_paste?(raw)
+          while Borgator::InputDrain.unclosed_paste?(raw)
             more = read_raw_input(50)
             break if more.nil? || more.empty?
 
             raw << more.dup.force_encoding(Encoding::BINARY)
           end
 
-          @__agent_cli_event_q.concat(AgentCli::InputDrain.parse_all(raw))
-          @__agent_cli_event_q.shift
+          @__borgator_event_q.concat(Borgator::InputDrain.parse_all(raw))
+          @__borgator_event_q.shift
         end
       end
 

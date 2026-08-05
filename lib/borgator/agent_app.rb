@@ -548,19 +548,19 @@ class AgentApp
       @cursor_pos = [@cursor_pos + 1, @input.length].min
       @suggest_cursor = 0
       [self, nil]
-    elsif message.to_s == 'alt+left' || message.key_type == AgentCli::InputDrain::KEY_ALT_LEFT
+    elsif message.to_s == 'alt+left' || message.key_type == Borgator::InputDrain::KEY_ALT_LEFT
       @cursor_pos = prev_word_boundary(@input, @cursor_pos)
       @suggest_cursor = 0
       [self, nil]
-    elsif message.to_s == 'alt+right' || message.key_type == AgentCli::InputDrain::KEY_ALT_RIGHT
+    elsif message.to_s == 'alt+right' || message.key_type == Borgator::InputDrain::KEY_ALT_RIGHT
       @cursor_pos = next_word_boundary(@input, @cursor_pos)
       @suggest_cursor = 0
       [self, nil]
-    elsif message.to_s == 'ctrl+left' || message.key_type == AgentCli::InputDrain::KEY_CTRL_LEFT
+    elsif message.to_s == 'ctrl+left' || message.key_type == Borgator::InputDrain::KEY_CTRL_LEFT
       @cursor_pos = prev_word_boundary(@input, @cursor_pos)
       @suggest_cursor = 0
       [self, nil]
-    elsif message.to_s == 'ctrl+right' || message.key_type == AgentCli::InputDrain::KEY_CTRL_RIGHT
+    elsif message.to_s == 'ctrl+right' || message.key_type == Borgator::InputDrain::KEY_CTRL_RIGHT
       @cursor_pos = next_word_boundary(@input, @cursor_pos)
       @suggest_cursor = 0
       [self, nil]
@@ -571,7 +571,7 @@ class AgentApp
       end
       @suggest_cursor = 0
       [self, nil]
-    elsif message.to_s == 'alt+backspace' || message.key_type == AgentCli::InputDrain::KEY_ALT_BACKSPACE
+    elsif message.to_s == 'alt+backspace' || message.key_type == Borgator::InputDrain::KEY_ALT_BACKSPACE
       # Delete the previous word (opt+delete / alt+backspace)
       new_cursor = prev_word_boundary(@input, @cursor_pos)
       @input = @input[0...new_cursor] + (@input[@cursor_pos..] || '')
@@ -782,7 +782,7 @@ class AgentApp
 
     # Ctrl+V / Cmd often arrives as ctrl+v — pull from system clipboard.
     if message.to_s == 'ctrl+v'
-      pasted = AgentCli::InputDrain.clipboard_text
+      pasted = Borgator::InputDrain.clipboard_text
       if pasted && !pasted.empty?
         @api_key_input += pasted.gsub(/[\r\n\t]+/, '').strip
         @api_key_error = nil
@@ -907,12 +907,12 @@ class AgentApp
 
   def api_key_help_url(env_name)
     case env_name
-    when 'OPENROUTER_API_KEY' then 'https://openrouter.ai/keys  ·  saved to ~/.agent-cli/settings.json'
-    when 'ANTHROPIC_API_KEY'  then 'https://console.anthropic.com/  ·  saved to ~/.agent-cli/settings.json'
-    when 'OPENAI_API_KEY'     then 'https://platform.openai.com/api-keys  ·  saved to ~/.agent-cli/settings.json'
-    when 'GEMINI_API_KEY'     then 'https://aistudio.google.com/apikey  ·  saved to ~/.agent-cli/settings.json'
-    when 'GROQ_API_KEY'       then 'https://console.groq.com/keys  ·  saved to ~/.agent-cli/settings.json'
-    else 'saved to ~/.agent-cli/settings.json'
+    when 'OPENROUTER_API_KEY' then 'https://openrouter.ai/keys  ·  saved to ~/.borgator/settings.json'
+    when 'ANTHROPIC_API_KEY'  then 'https://console.anthropic.com/  ·  saved to ~/.borgator/settings.json'
+    when 'OPENAI_API_KEY'     then 'https://platform.openai.com/api-keys  ·  saved to ~/.borgator/settings.json'
+    when 'GEMINI_API_KEY'     then 'https://aistudio.google.com/apikey  ·  saved to ~/.borgator/settings.json'
+    when 'GROQ_API_KEY'       then 'https://console.groq.com/keys  ·  saved to ~/.borgator/settings.json'
+    else 'saved to ~/.borgator/settings.json'
     end
   end
 
@@ -1130,7 +1130,7 @@ class AgentApp
     end
   end
 
-  # Gray box with purple left edge: input row + Agent · model · provider.
+  # Gray box with purple left edge: input row + Borgator · model · provider.
   def composer_lines
     width = [@width, 40].max
     input =
@@ -1154,7 +1154,7 @@ class AgentApp
   end
 
   def composer_meta
-    mode = @composer_accent.render('Agent')
+    mode = @composer_accent.render('Borgator')
     sep = @composer_dim_bg.render(' · ')
     if @provider
       model = @composer_fg.render(@provider.model_label.to_s)

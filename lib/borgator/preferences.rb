@@ -7,7 +7,7 @@ require 'fileutils'
 # provider/model for worker (sub-)agents, and named "model sets" the user can
 # switch between quickly via the /models command.
 class Preferences
-  PATH = File.expand_path('~/.config/agent-cli/preferences.json')
+  PATH = File.expand_path('~/.config/borgator/preferences.json')
 
   # Returns { provider:, model:, worker_provider?:, worker_model?: } or nil.
   def self.load

@@ -7,7 +7,7 @@ require 'time'
 
 module HTTP
   LOG_DIR = 'log'
-  USER_AGENT = 'agent-cli/1.0'
+  USER_AGENT = 'borgator/1.0'
 
   class << self
     def debug_enabled
@@ -23,7 +23,7 @@ module HTTP
       return nil unless debug_enabled == true
 
       FileUtils.mkdir_p(LOG_DIR)
-      path = File.join(LOG_DIR, "agent-cli-#{Time.now.strftime('%Y%m%d-%H%M%S')}.log")
+      path = File.join(LOG_DIR, "borgator-#{Time.now.strftime('%Y%m%d-%H%M%S')}.log")
       File.open(path, 'a')
     end
 

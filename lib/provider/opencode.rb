@@ -4,8 +4,8 @@ require 'json'
 require 'net/http'
 require 'uri'
 
-require_relative '../agent_cli/model'
-require_relative '../agent_cli/usage'
+require_relative '../borgator/model'
+require_relative '../borgator/usage'
 require_relative 'base'
 
 class Provider
@@ -253,7 +253,7 @@ class OpencodeProvider
   def ensure_session
     return if @session_id
 
-    resp = http(:post, '/session', { title: 'agent-cli' })
+    resp = http(:post, '/session', { title: 'borgator' })
     @session_id = resp['id'] or raise "session create returned no id: #{resp.inspect}"
   end
 

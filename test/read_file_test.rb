@@ -2,7 +2,7 @@
 
 require 'minitest/autorun'
 require 'tmpdir'
-require_relative '../lib/agent_cli/tools'
+require_relative '../lib/borgator/tools'
 
 # The invariant throughout: a read never quietly hands back less than it claims.
 class ReadFileTest < Minitest::Test

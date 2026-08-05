@@ -3,9 +3,9 @@
 require 'json'
 require 'fileutils'
 
-# Persisted settings (API keys, etc.) under ~/.agent-cli/settings.json
+# Persisted settings (API keys, etc.) under ~/.borgator/settings.json
 class Settings
-  PATH = File.expand_path('~/.agent-cli/settings.json')
+  PATH = File.expand_path('~/.borgator/settings.json')
 
   class MissingApiKeyError < StandardError
     attr_reader :env_name

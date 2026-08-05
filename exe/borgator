@@ -1,10 +1,10 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Installed entrypoint. RubyGems puts this on your PATH as `agent-cli`.
+# Installed entrypoint. RubyGems puts this on your PATH as `borgator`.
 # Run it from inside any project directory — the agent operates on the
 # current working directory (Dir.pwd).
 
-require 'agent_cli'
+require 'borgator'
 
-AgentCli.start
+Borgator.start

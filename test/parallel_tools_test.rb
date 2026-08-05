@@ -2,7 +2,7 @@
 
 require 'minitest/autorun'
 require 'tmpdir'
-require_relative '../lib/agent_cli/agents'
+require_relative '../lib/borgator/agents'
 
 class ParallelToolsTest < Minitest::Test
   class FakeAgent

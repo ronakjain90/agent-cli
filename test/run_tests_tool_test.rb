@@ -3,7 +3,7 @@
 require 'minitest/autorun'
 require 'tmpdir'
 require 'fileutils'
-require_relative '../lib/agent_cli/tools'
+require_relative '../lib/borgator/tools'
 
 class RunTestsToolTest < Minitest::Test
   def in_project(&block)

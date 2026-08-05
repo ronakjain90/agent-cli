@@ -4,7 +4,7 @@ require 'fileutils'
 
 # Persists submitted prompts so up/down can recall them across sessions.
 class PromptHistory
-  PATH  = File.expand_path('~/.config/agent-cli/history')
+  PATH  = File.expand_path('~/.config/borgator/history')
   LIMIT = 1000
 
   def self.load
