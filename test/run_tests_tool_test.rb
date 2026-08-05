@@ -134,6 +134,14 @@ class RunTestsToolTest < Minitest::Test
     end
   end
 
+  def test_detects_minitest_with_gemfile_and_test_dir_no_rakefile
+    in_project do
+      FileUtils.touch("Gemfile")
+      FileUtils.mkdir_p("test")
+      assert_equal "minitest", detect
+    end
+  end
+
   def test_returns_nil_for_unrecognized_project
     in_project { assert_nil detect }
   end

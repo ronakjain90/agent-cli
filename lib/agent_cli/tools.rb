@@ -537,6 +537,8 @@ module Tools
       return "bin/rails test" if File.executable?("bin/rails")
       # Ruby — rake-driven minitest.
       return "#{bundle_prefix}rake test" if File.exist?("Rakefile") && File.directory?("test")
+      # Ruby — minitest with a Gemfile but no Rakefile.
+      return "minitest" if File.exist?("Gemfile") && File.directory?("test")
       # JavaScript / TypeScript — a "test" script in package.json.
       return js_test_command if File.exist?("package.json") && package_test_script?
       # Python — pytest.
